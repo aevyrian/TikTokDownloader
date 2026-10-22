@@ -144,6 +144,8 @@ def test_api_auth_submit_files_settings_and_reopen(tmp_path):
         assert client.get(f'/api/files/{ident}/0', headers=headers).content == b'x'*1024
         assert client.post(f'/api/tasks/{ident}/retry', headers=headers).status_code == 409
         assert client.post('/api/tasks', headers=headers, json={'text':URL}).json()['items'][0]['duplicate']
+        assert client.post('/api/history/check', headers=headers, json={'ids':[ID,'7999999999999999999']}).json()['items'] == {ID:'completed','7999999999999999999':'new'}
+        assert client.post('/api/history/check', headers=headers, json={'ids':['bad']}).status_code == 400
         assert client.put('/api/settings', headers=headers, json={'cookie':'secret-value'}).status_code == 200
         assert 'secret-value' not in client.get('/api/settings', headers=headers).text
         assert client.get('/api/settings', headers=headers).json()['has_cookie']
@@ -178,3 +180,18 @@ def test_cookie_params_are_per_request():
     Resolver.configure_interface(second, '')
     assert first.params == {'uifid':'visitor','msToken':'token'}
     assert second.params == original == {'uifid':'','msToken':''}
+
+
+def test_partial_profile_keeps_children(tmp_path):
+    class Partial:
+        async def resolve(self, *_):
+            return {'children':[URL], 'warning':'后续分页失败'}
+    async def scenario():
+        store=Store(tmp_path)
+        store.add([canonical('https://www.douyin.com/user/test')])
+        await Queue(store,Partial(),None).execute(store.claim())
+        assert store.page()['total']==2
+        assert store.page()['items'][1]['state']=='partial'
+        assert store.page()['items'][0]['media_key']==ID
+        store.db.close()
+    asyncio.run(scenario())

@@ -156,7 +156,8 @@ class Queue:
             result = await asyncio.wait_for(self.resolver.resolve(task['url'], config), timeout=180)
             if 'children' in result:
                 added = self.store.add([canonical(u) for u in result['children']])
-                self.store.update(ident, state='completed', title=f'分页采集：{len(added)} 条作品', error='')
+                warning = result.get('warning', '')
+                self.store.update(ident, state='partial' if warning else 'completed', title=f'分页采集：{len(added)} 条作品', error=warning)
                 return
             key = str(result['id'])
             # Canonical aliases and share URLs converge before downloading; no await until ownership is established.

@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const names = {queued:'排队中',running:'下载中',retry_wait:'等待重试',failed:'失败',completed:'已完成',skipped:'已跳过'};
+const names = {partial:'部分完成',queued:'排队中',running:'下载中',retry_wait:'等待重试',failed:'失败',completed:'已完成',skipped:'已跳过'};
 let token = sessionStorage.getItem('douyin-token') || '', page = 1, total = 0, connected = false, busy = false, rendered = "";
 $('token').value = token;
 function message(text, error=false) { $('message').textContent = text; $('message').className = error ? 'error' : ''; }
@@ -24,7 +24,7 @@ async function refresh() {
       if(task.state==='running'){const meter=element('progress');meter.max=task.total||1; if(task.total)meter.value=task.progress;info.append(meter,element('small',`${(task.progress/1048576).toFixed(1)} MB`));}
       if(task.error)info.append(element('small',task.error,'error'));
       const actions=element('div',undefined,'task-actions');
-      if(['failed','retry_wait'].includes(task.state)){const retry=element('button','重试');retry.onclick=async()=>{try{await api(`/tasks/${task.id}/retry`,{method:'POST'});await refresh();}catch(e){message(e.message,true);}};actions.append(retry);}
+      if(['failed','retry_wait','partial'].includes(task.state)){const retry=element('button','重试');retry.onclick=async()=>{try{await api(`/tasks/${task.id}/retry`,{method:'POST'});await refresh();}catch(e){message(e.message,true);}};actions.append(retry);}
       task.files.forEach((file,index)=>{const b=element('button',`保存文件 ${index+1}`);b.onclick=async()=>{try{const response=await fetch(`/api/files/${task.id}/${index}`,{headers:{Authorization:'Bearer '+token}});if(!response.ok)throw new Error('文件不存在或连接失败');const blob=await response.blob(),url=URL.createObjectURL(blob),a=element('a');a.href=url;a.download=file.split(/[\\/]/).pop();a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){message(e.message,true);}};actions.append(b);});
       info.append(actions);row.append(info,element('span',names[task.state]||task.state,'pill'));$('tasks').append(row);
     }

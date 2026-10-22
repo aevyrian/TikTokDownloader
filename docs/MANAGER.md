@@ -20,14 +20,15 @@ python -m venv .venv
 
 按作者或视频/图集类型归档，文件保存在 `manager-data/downloads`。传输先写 `.part`，校验非空、响应类型及长度后原子改名；失败不写下载历史。重启/重试重新下载当前作品，不承诺断点续传。数据库记录的完成只代表传输校验通过，不包含播放器逐帧验证。
 
-## 浏览器扩展（独立安装）
+## 油猴脚本（使用现有脚本管理器）
 
-1. 在支持 Manifest V3 的浏览器扩展管理页打开“开发者模式”。
-2. 选择“加载已解压的扩展程序”，选择仓库 `extension` 目录。扩展不运行在 Docker 内。
-3. 打开扩展，后台地址填写 `http://127.0.0.1:8787`，令牌填写上面的本机令牌，点击“保存并连接”。浏览器弹出权限提示时允许访问该后台。
-4. 在抖音作品页点击“提交当前作品”；或“收集本页链接”，检查文本框后提交。收集的是当前已加载 DOM 内的作品，不会自动无限滚动；主页批量请提交主页链接给后台分页处理。
+1. 使用已有油猴 / Tampermonkey / 脚本猫，不安装新的浏览器扩展。
+2. 打开 [用户脚本安装链接](https://raw.githubusercontent.com/aevyrian/TikTokDownloader/refs/heads/feat/personal-download-manager/userscript/douyin-download-manager.user.js)，由脚本管理器确认安装；也可在脚本管理器中新建脚本，粘贴仓库 `userscript/douyin-download-manager.user.js` 全文并保存。
+3. 刷新抖音页面，右下角点击“下载管理”，展开“后台连接设置”。地址填写 `http://127.0.0.1:8787`，令牌填写本机令牌，点击“保存并测试连接”。脚本管理器提示访问该后台时允许。
+4. 在作品页点击“下载当前作品”，或“收集本页链接”，删改文本框后点击“提交这些链接”。不会自动无限滚动；完整主页分页可提交主页链接给后台。
+5. “识别本页历史”查询后台已下载/排队/失败状态，为页面链接添加边框和悬停提示。只标记当前已加载链接；抖音动态布局没有可识别链接时不猜测作品 ID。
 
-扩展只在用户点击时访问当前页，后台访问权限按配置地址申请。令牌保存在当前浏览器的本地扩展存储，不使用云同步；卸载扩展可清理。不同电脑使用 NAS 的内网地址和该 NAS 的令牌。普通 HTTP 只适用于可信内网；远程使用 HTTPS 反向代理。
+脚本通过 `GM_xmlhttpRequest` 访问后台，不受页面普通 fetch 的跨域限制；仅向配置地址发送后台令牌，不自动读取抖音 Cookie。令牌使用 `GM_setValue` 保存在脚本管理器中。删除脚本及脚本数据可清理。NAS 使用内网地址和该 NAS 的后台令牌。普通 HTTP 只适用于可信内网，远程使用 HTTPS。`@connect *` 为自定义 NAS 地址预留，实际请求仍只访问手动配置的后台地址。
 
 ## Docker / NAS
 
@@ -53,9 +54,10 @@ docker compose -f compose.manager.yaml exec douyin-manager cat /data/access-toke
 ```sh
 python -m pip install pytest==8.3.5
 python -m pytest tests/test_manager.py -q
-node tests/extension-integration.cjs http://127.0.0.1:8787 manager-data/access-token
+node tests/userscript-integration.cjs
+node tests/userscript-integration.cjs http://127.0.0.1:8787 manager-data/access-token
 ```
 
-第二条命令测试扩展的共享 HTTP 客户端与真实后台的认证、提交和去重，不等于浏览器已安装扩展。使用测试 ID 会产生一个真实队列任务；请仅在隔离验证实例运行该联动检查。
+脚本测试直接加载生产用户脚本中的链接识别、批量收集、GM 请求、错误处理逻辑；指定后台地址时通过 GM 传输适配器请求真实后台，检查提交、去重及历史查询，不等于浏览器已安装脚本。联动检查会产生一个作品任务；请在隔离实例运行。
 
 实际验收结果及未完成事项见 [验证记录](MANAGER_VALIDATION.md)。

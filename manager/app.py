@@ -25,6 +25,10 @@ class Configuration(BaseModel):
     cookie: str | None = Field(default=None, max_length=20000)
 
 
+class HistoryCheck(BaseModel):
+    ids: list[str] = Field(max_length=500)
+
+
 def create_app(data_dir=None, resolver=None, downloader=None):
     root = Path(data_dir or os.environ.get('DOUYIN_DATA', 'manager-data')).resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -89,7 +93,7 @@ def create_app(data_dir=None, resolver=None, downloader=None):
         row = store.db.execute('SELECT state FROM tasks WHERE id=?', (ident,)).fetchone()
         if not row:
             raise HTTPException(404, '任务不存在')
-        if row['state'] not in {'failed', 'retry_wait'}:
+        if row['state'] not in {'failed', 'retry_wait', 'partial'}:
             raise HTTPException(409, '只能重试失败或等待重试的任务')
         store.update(ident, state='queued', attempts=0, next_run=0, error='', progress=0, total=0)
         return {'ok': True}
@@ -112,6 +116,19 @@ def create_app(data_dir=None, resolver=None, downloader=None):
             return {'imported': state['store'].import_history(root / 'legacy' / 'DouK-Downloader.db')}
         except (ValueError, sqlite3.Error):
             raise HTTPException(400, '请将旧数据库副本放入数据目录 legacy/DouK-Downloader.db；需要 download_data 表') from None
+
+    @app.post('/api/history/check', dependencies=[Depends(auth)])
+    async def check_history(body: HistoryCheck):
+        import re
+        store = state['store']
+        result = {}
+        for ident in dict.fromkeys(body.ids):
+            if not re.fullmatch(r'\d{15,24}', ident):
+                raise HTTPException(400, '作品 ID 格式无效')
+            old = store.db.execute('SELECT 1 FROM history WHERE media_key=?', (ident,)).fetchone()
+            task = store.db.execute('SELECT state FROM tasks WHERE media_key=?', (ident,)).fetchone()
+            result[ident] = 'completed' if old else task['state'] if task else 'new'
+        return {'items': result}
 
     @app.get('/api/files/{ident}/{index}', dependencies=[Depends(auth)])
     async def file(ident: int, index: int):

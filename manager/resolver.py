@@ -66,12 +66,14 @@ class Resolver:
                     account.response = []
                     items = await account.run(single_page=True)
                     if not items:
+                        if children:
+                            return {'children': list(dict.fromkeys(children)), 'warning': '后续分页返回空数据，已保留已采集作品；请检查 Cookie 后重试'}
                         raise RuntimeError('账号分页返回空数据，请检查 Cookie、权限和平台兼容性')
                     children.extend(f'https://www.douyin.com/video/{i["aweme_id"]}' for i in items)
                     if account.finished:
                         break
                     if account.cursor == cursor:
-                        raise RuntimeError('账号分页游标未前进，已停止以避免重复请求')
+                        return {'children': list(dict.fromkeys(children)), 'warning': '分页游标未前进，已保留已采集作品并停止重复请求'}
                     cursor = account.cursor
                 return {'children': list(dict.fromkeys(children))}
             detail = self.configure_interface(Detail(params, cookie=cookie, detail_id=key), cookie)
