@@ -1,0 +1,42 @@
+name: Personal manager checks
+on:
+  push:
+    branches: [feat/personal-download-manager]
+  pull_request:
+    paths: ['manager/**', 'userscript/**', 'tests/**', 'requirements-manager.txt', 'Dockerfile.manager', 'compose.manager.yaml', '.github/workflows/manager-ci.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -r requirements-manager.txt pytest==8.3.5
+      - run: python -m pytest tests/test_manager.py -q
+      - run: node --check userscript/douyin-download-manager.user.js && node tests/userscript-integration.cjs && node --check manager/web/app.js
+      - run: docker compose -f compose.manager.yaml config --quiet
+      - run: docker build -f Dockerfile.manager -t douyin-manager:test .
+      - name: Container and userscript client smoke test
+        run: |
+          docker run -d --name douyin-manager -p 127.0.0.1:8787:8787 douyin-manager:test
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8787/health; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8787/health
+          docker cp douyin-manager:/data/access-token "$RUNNER_TEMP/douyin-test-token"
+          node tests/userscript-integration.cjs http://127.0.0.1:8787 "$RUNNER_TEMP/douyin-test-token"
+          docker restart douyin-manager
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8787/health; then break; fi
+            sleep 1
+          done
+          node tests/userscript-integration.cjs http://127.0.0.1:8787 "$RUNNER_TEMP/douyin-test-token"
+      - if: always()
+        run: docker rm -f douyin-manager || true

@@ -1,0 +1,9 @@
+.git
+.venv
+manager-data
+Volume
+test-results
+.env
+**/__pycache__
+**/*.pyc
+.pytest_cache

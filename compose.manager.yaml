@@ -1,0 +1,14 @@
+services:
+  douyin-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile.manager
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - douyin-data:/data
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  douyin-data:

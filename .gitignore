@@ -6,3 +6,8 @@ __pycache__/
 /.run/
 /Volume/
 !/.github/
+/manager-data/
+/test-results/
+/.pytest_cache/
+/.env
+*.part

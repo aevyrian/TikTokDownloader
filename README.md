@@ -1,3 +1,5 @@
+> **个人下载管理器开发分支**：新增油猴用户脚本、持久化队列、中文面板和 Docker Compose。复用已有油猴/脚本猫，不另装浏览器扩展。启动与安装见 [管理器说明](docs/MANAGER.md)，来源核查见 [项目核查](docs/MANAGER_PROVENANCE.md)。
+
 <div align="center">
 <img src="./static/images/DouK-Downloader.png" alt="DouK-Downloader" height="256" width="256"><br>
 <h1>DouK-Downloader</h1>
