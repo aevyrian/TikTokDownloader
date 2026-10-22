@@ -1,6 +1,6 @@
 # 项目核查（2026-10-22）
 
-- 开发目标：aevyrian/TikTokDownloader，默认分支 master，基线 `473c90ff70c663cfb69310fff2b8d5192f200661`。
+- 开发目标：aevyrian/TikTokDownloader，默认分支 master，基线 `473c90ff70c663cfb69310fff2b8d5192f200661`。GitHub REST 元数据核实 fork=true，parent/source 均为 JoeanAmier/TikTokDownloader，license=GPL-3.0。
 - README、pyproject 和源码常量均标明原项目 JoeanAmier/TikTokDownloader（DouK-Downloader 5.8），根目录 license 为 GPLv3。新增管理器沿用该许可证。
 - 本地旧副本位于 `2026-09-04/github-clxj-tiktokdownloader-x20/work/TikTokDownloader`，remote 为 Clxj/TikTokDownloader；没有改动该目录。
 - 在当前工作区、文档、Downloads、OneDrive 的文件名，以及 ChatGPT 项目文档内容中查找，未找到可核实的 douyin-download-manager 源码或专属浏览器扩展。仅在对话/提示词记录中找到名称。不能认定其与 TikTokDownloader 相同，不能声称保留了尚未找到的独有分流规则。

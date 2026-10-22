@@ -1,5 +1,6 @@
 """Reuse the repository's existing Detail/Account interfaces and signing code."""
 import logging
+from http.cookies import SimpleCookie
 from types import SimpleNamespace
 
 import httpx
@@ -8,6 +9,20 @@ from .core import canonical
 
 
 class Resolver:
+    @staticmethod
+    def configure_interface(interface, cookie):
+        parsed = SimpleCookie()
+        try:
+            parsed.load(cookie)
+        except Exception:
+            raise ValueError('Cookie 格式无效') from None
+        values = {key.lower(): item.value for key, item in parsed.items()}
+        # Upstream Parameter normally sets these globals; copy per request to avoid cross-task leakage.
+        interface.params = dict(interface.params)
+        interface.params['uifid'] = values.get('uifid', '')
+        interface.params['msToken'] = values.get('mstoken', '')
+        return interface
+
     async def resolve(self, url, config):
         url, key = canonical(url)
         if key.startswith('share:'):
@@ -45,7 +60,7 @@ class Resolver:
             API.init_progress_object(True)
             cookie = config.get('cookie', '')
             if key.startswith('user:'):
-                account = Account(params, cookie=cookie, sec_user_id=key[5:], pages=config['max_pages'])
+                account = self.configure_interface(Account(params, cookie=cookie, sec_user_id=key[5:], pages=config['max_pages']), cookie)
                 children, cursor = [], 0
                 for _ in range(config['max_pages']):
                     account.response = []
@@ -59,7 +74,8 @@ class Resolver:
                         raise RuntimeError('账号分页游标未前进，已停止以避免重复请求')
                     cursor = account.cursor
                 return {'children': list(dict.fromkeys(children))}
-            data = await Detail(params, cookie=cookie, detail_id=key).run()
+            detail = self.configure_interface(Detail(params, cookie=cookie, detail_id=key), cookie)
+            data = await detail.run()
             if not data:
                 raise RuntimeError('平台未返回作品：可能需要有效 Cookie，或当前解析与平台不兼容')
             return self.normalize(data)

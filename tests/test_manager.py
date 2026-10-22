@@ -167,3 +167,14 @@ def test_upstream_adapter_imports():
     from src.encrypt import DouYinParams
     assert callable(Detail)
     assert callable(DouYinParams().sign_url)
+
+
+def test_cookie_params_are_per_request():
+    from types import SimpleNamespace
+    original = {'uifid':'', 'msToken':''}
+    first = SimpleNamespace(params=original)
+    second = SimpleNamespace(params=original)
+    Resolver.configure_interface(first, 'UIFID=visitor; msToken=token')
+    Resolver.configure_interface(second, '')
+    assert first.params == {'uifid':'visitor','msToken':'token'}
+    assert second.params == original == {'uifid':'','msToken':''}
