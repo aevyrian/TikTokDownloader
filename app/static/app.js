@@ -24,7 +24,7 @@
   if (typeof module !== 'undefined' && module.exports) { module.exports = { mediaURL, switchView, moveGallery, isVideoFile, authorInitial, keyError, taskTitle, playVisible, applySound, releasePlayback, preloadVideos }; return; }
   const $ = id => document.getElementById(id);
   if (location.protocol === 'file:') { $('connect-form').hidden = true; $('local-preview').hidden = false; return; }
-  const state = { token: localStorage.getItem('library_access_key') || '', muted:localStorage.getItem('library_muted')!=='false', auth: null, view: 'library', items: [], total: 0, generation: 0, busy: false };
+  const state = { token: localStorage.getItem('library_access_key') || '', muted:true, auth: null, view: 'library', items: [], total: 0, generation: 0, navigation: 0, busy: false };
   const statusNames = { queued: '已排队', paused:'已暂停', parsing: '正在解析', awaiting_confirmation: '等待画质确认', downloading: '正在下载', completed: '完整保存', failed: '失败', interrupted: '已中断', cancelled: '已取消' };
   const titles = { library: ['作品库', 'FOR YOU'], favorites:['收藏','SAVED WORKS'], tasks: ['下载', 'DOWNLOADS'], authors: ['订阅', 'CREATORS'], settings: ['设置', 'LIBRARY SETTINGS'] };
   function element(tag, className, text) { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = String(text); return node; }
@@ -54,7 +54,7 @@
   }
   function disconnect() {
     switchView('library', document.querySelectorAll('video'));
-    state.token = ''; localStorage.removeItem('library_access_key'); state.generation++;
+    state.token = ''; localStorage.removeItem('library_access_key'); state.generation++; state.navigation++;
     $('application').hidden = true; $('connection').hidden = false;
     $('access-key').value = ''; $('script-token').value = ''; $('cookie').value = ''; $('feed').replaceChildren();
     $('confirm-key').value = ''; $('legacy-key').value = ''; $('admin-key-form').reset(); connectionMode();
@@ -113,6 +113,7 @@
     for (const [name, value] of values) $('system-status').append(element('dt', '', name), element('dd', '', value ?? '暂无'));
   }
   async function navigate(view) {
+    const navigation = ++state.navigation;
     if(view==='favorites'&&state.view!==view){$('search-query').value='';$('search-author').value='';}
     state.view = switchView(view, document.querySelectorAll('video'));
     $('application').dataset.view = state.view;
@@ -126,7 +127,7 @@
       else if (state.view === 'tasks') await loadTasks();
       else if (state.view === 'authors') await loadAuthors();
       else await loadSettings();
-    } catch (error) { notice(error.message, true); }
+    } catch (error) { if (navigation === state.navigation) notice(error.message, true); }
   }
   let playbackFrame=0,warmTimer=0,activeCard=null,fullscreenCard=null,restoringFullscreen=false;
   function syncPlayback(){
@@ -307,12 +308,15 @@
     if (['queued', 'failed', 'interrupted'].includes(task.status)) actions.append(action('取消任务', async () => { await api(`/api/tasks/${encodeURIComponent(task.id)}/cancel`, 'POST'); await loadTasks(); }));
     card.append(content, actions); return card;
   }
-  const taskView = window.CloudriftTaskView.create({ root: $('view-tasks'), application: $('application'), makeTaskCard: taskCard, title: taskTitle, statusNames, formatDate });
+  const taskView = window.CloudriftTaskView.create({ application: $('application'), makeTaskCard: taskCard, title: taskTitle });
   async function loadTasks() {
-    taskView.update(await api('/api/tasks'));
+    const navigation = state.navigation, tasks = await api('/api/tasks');
+    if (navigation === state.navigation && state.view === 'tasks') taskView.update(tasks);
   }
   async function loadAuthors() {
-    const authors = await api('/api/authors/history'); $('author-list').replaceChildren();
+    const navigation = state.navigation, authors = await api('/api/authors/history');
+    if (navigation !== state.navigation || state.view !== 'authors') return;
+    $('author-list').replaceChildren();
     $('author-list').append(element('h2','creator-heading',`订阅中 · ${authors.filter(a=>a.enabled).length}`));
     if(!authors.some(a=>a.enabled))$('author-list').append(element('p','muted','暂未设置追更；下载一次的博主会留在下方历史里。'));
     let historyShown=false;
@@ -335,15 +339,22 @@
     if(!authors.length)empty($('author-list'),'还没有历史博主','从抖音发送博主或在这里添加，下载过的博主会自动留在这里。');
   }
   async function loadSettings() {
-    const [settings, status] = await Promise.all([api('/api/settings'), api('/api/status')]);
-    $('cookie-state').textContent = settings.cookie_configured ? '已配置' : '未配置'; $('cookie-state').className = `badge ${settings.cookie_configured ? 'good' : ''}`;
-    $('cookie').value = ''; $('clear-cookie').checked = false; $('quality-policy').value = settings.quality_policy || 'upstream';
-    $('download-dir').value = settings.download_dir; $('download-dir-hint').textContent = `可用范围：${settings.media_root} 及其子目录。修改不搬迁已有文件；更换 NAS 磁盘请修改 Compose 挂载。`;
-    $('script-server').value = location.origin; $('script-token').value = settings.script_token || state.token; $('script-token').type = 'password'; $('reveal-token').textContent = '显示'; showStatus(status);
-    await loadLegacy();
+    const navigation = state.navigation;
+    await Promise.all([
+      api('/api/settings').then(settings => {
+        if (navigation !== state.navigation || state.view !== 'settings') return;
+        $('cookie-state').textContent = settings.cookie_configured ? '已配置' : '未配置'; $('cookie-state').className = `badge ${settings.cookie_configured ? 'good' : ''}`;
+        $('cookie').value = ''; $('clear-cookie').checked = false; $('quality-policy').value = settings.quality_policy || 'upstream';
+        $('download-dir').value = settings.download_dir; $('download-dir-hint').textContent = `可用范围：${settings.media_root} 及其子目录。修改不搬迁已有文件；更换 NAS 磁盘请修改 Compose 挂载。`;
+        $('script-server').value = location.origin; $('script-token').value = settings.script_token || state.token; $('script-token').type = 'password'; $('reveal-token').textContent = '显示';
+      }),
+      api('/api/status').then(status => { if (navigation === state.navigation && state.view === 'settings') showStatus(status); }),
+      loadLegacy()
+    ]);
   }
   async function loadLegacy() {
-    const scan = await api('/api/legacy');
+    const navigation = state.navigation, scan = await api('/api/legacy');
+    if (navigation !== state.navigation) return;
     $('legacy-panel').hidden = !scan.configured;
     if (!scan.configured) return;
     const counts = `${Number(scan.scanned_files || 0).toLocaleString()} 个文件 · ${Number(scan.indexed_works || 0).toLocaleString()} 个作品`;
@@ -366,7 +377,7 @@
   $('back-recommendations').addEventListener('click',()=>{$('search-query').value='';$('search-author').value='';loadLibrary(true).catch(error=>notice(error.message,true));});
   function paintSound(){const button=$('sound-toggle');button.textContent=state.muted?'声音：关':'声音：开';button.setAttribute('aria-pressed',String(!state.muted));button.title=state.muted?'打开所有视频声音':'关闭所有视频声音';}
   paintSound();
-  $('sound-toggle').addEventListener('click',()=>{state.muted=!state.muted;localStorage.setItem('library_muted',String(state.muted));applySound($('feed').querySelectorAll('video'),state.muted);paintSound();const v=activeCard?.querySelector('video');if(v){v.playbackActive=false;playVisible(v,true);}});
+  $('sound-toggle').addEventListener('click',()=>{state.muted=!state.muted;applySound($('feed').querySelectorAll('video'),state.muted);paintSound();const v=activeCard?.querySelector('video');if(v){v.playbackActive=false;playVisible(v,true);}});
   $('refresh-tasks').addEventListener('click', () => loadTasks().catch(error => notice(error.message, true)));
   $('open-submit').addEventListener('click', () => { $('submit-message').textContent = ''; $('submit-dialog').showModal(); });
   $('close-submit').addEventListener('click', () => $('submit-dialog').close());

@@ -7,9 +7,9 @@
   <title>Cloudrift · Personal Library</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg?v=20261023">
   <link rel="stylesheet" href="style.css?v=1.2.5">
-  <link rel="stylesheet" href="/static/task-view.css?v=20261024-1">
-  <script src="/static/task-view.js?v=20261024-1" defer></script>
-  <script src="app.js?v=1.2.5&amp;tasks=1" defer></script>
+  <link rel="stylesheet" href="/static/task-view.css?v=20261024-a-nav">
+  <script src="/static/task-view.js?v=20261024-a-nav" defer></script>
+  <script src="app.js?v=1.2.5&amp;tasks=20261024-a-nav" defer></script>
 </head>
 <body>
   <section id="connection" class="connection" aria-label="Cloudrift 管理员入口">
@@ -67,13 +67,6 @@
         <div id="feed" class="feed" tabindex="0" aria-label="作品流"></div>
       </section>
       <section id="view-tasks" class="view" hidden>
-        <div class="task-layout-bar">
-          <div class="task-layout-options" role="group" aria-label="下载页布局">
-            <button type="button" data-task-layout-choice="a" aria-pressed="true">A · 沉浸列表</button>
-            <button type="button" data-task-layout-choice="b" aria-pressed="false">B · 专注工作台</button>
-          </div>
-          <p id="task-layout-note">当前浏览器会记住你的选择</p>
-        </div>
         <div id="task-summary" class="task-summary" aria-label="任务概况"></div>
         <div class="task-workspace">
           <section class="task-queue" aria-label="下载任务列表">
@@ -84,7 +77,6 @@
               <span id="task-result-count" aria-live="polite"></span>
               <button id="refresh-tasks" class="secondary" type="button">刷新</button>
             </div>
-            <div id="task-table-heading" class="task-table-heading" hidden><span>任务 / 最近更新</span><span>保存进度</span><span>状态</span></div>
             <div id="task-list" class="card-list"><p class="muted" role="status">正在读取下载任务…</p></div>
             <p class="task-queue-footer">默认只下载一次 · 已有作品核对后跳过 · 需要追更时在“订阅”中设置</p>
           </section>

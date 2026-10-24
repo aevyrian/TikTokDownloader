@@ -309,7 +309,7 @@ def make_app(data_dir=None, media_dir=None, token=None, core=None, legacy_dir=No
                             status_code=200 if healthy else 503)
 
     @app.get("/api/status", dependencies=[Depends(authorize)])
-    async def status():
+    def status():
         return {"version": VERSION, "core_ready": core.ready, "core_error": core.error,
                 "worker_alive": bool(service.running and service.worker and not service.worker.done()),
                 "queue_error": service.queue_error or service.schedule_error,
@@ -409,7 +409,7 @@ def make_app(data_dir=None, media_dir=None, token=None, core=None, legacy_dir=No
         return public_task(store.task(task_id))
 
     @app.get("/api/library", dependencies=[Depends(authorize)])
-    async def library(q: str = "", author: str = "", offset: int = Query(default=0, ge=0), limit: int = Query(default=30, ge=1, le=100), seed: int | None = Query(default=None,ge=0,le=4294967295), ceiling: int | None = Query(default=None,ge=0), favorite: bool = False):
+    def library(q: str = "", author: str = "", offset: int = Query(default=0, ge=0), limit: int = Query(default=30, ge=1, le=100), seed: int | None = Query(default=None,ge=0,le=4294967295), ceiling: int | None = Query(default=None,ge=0), favorite: bool = False):
         result = store.library(q[:200], author[:200], offset, limit, seed, ceiling, favorite)
         for item in result["items"]:
             item["files"] = [{"name": Path(file).name, "url": f"/api/media/{item['id']}/{i}"} for i, file in enumerate(item["files"])]

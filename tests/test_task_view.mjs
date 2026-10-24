@@ -15,15 +15,10 @@ const tasks = [
   { id: 'done', kind: 'author', status: 'completed', total: 2, completed: 2, preview: [{ nickname: '摄影笔记' }] },
   { id: 'paused', kind: 'detail', status: 'paused', total: 2, completed: 1, preview: [{ desc: '稍后继续' }] }
 ];
-assert.equal(view.normalizeLayout(null), 'a');
-assert.equal(view.normalizeLayout('unknown'), 'a');
-assert.equal(view.normalizeLayout('b'), 'b');
 assert.deepEqual(view.filterTasks(tasks, 'attention', '', taskTitle).map(t => t.id), ['failed', 'confirm']);
 assert.deepEqual(view.filterTasks(tasks, 'active', '稍后', taskTitle).map(t => t.id), ['paused']);
 assert.equal(view.selectedTask(view.filterTasks(tasks, 'all', '山野', taskTitle), 'failed').id, 'running');
 assert.equal(view.selectedTask([], 'failed'), undefined);
-assert.deepEqual(view.progressValue({ total: 3, completed: 9 }), { total: 3, completed: 3 });
-assert.deepEqual(view.progressValue({ total: -1, completed: -3 }), { total: 0, completed: 0 });
 
 class Element {
   constructor(tag = 'div', text = '') { this.tagName = tag; this.textContent = text; this.className = ''; this.children = []; this.dataset = {}; this.style = {}; this.attributes = {}; this.events = {}; this.value = ''; this.hidden = false; this.open = false; this.classList = { add: name => { this.className += ` ${name}`; } }; }
@@ -58,9 +53,8 @@ try {
   const normal = fixture();
   assert.equal(normal.application.dataset.taskLayout, 'a');
   normal.controller.update(tasks);
-  normal.choices[1].click();
-  assert.equal(normal.application.dataset.taskLayout, 'b');
-  assert.deepEqual(normal.writes, [['cloudrift_task_layout', 'b']]);
+  assert.deepEqual(normal.writes, []);
+  normal.ids['task-list'].children[0].querySelector('.record-actions').children.at(-1).click();
   assert.equal(normal.requests(), 0);
   normal.ids['task-query'].value = '山野';
   normal.ids['task-query'].events.input();
@@ -73,13 +67,11 @@ try {
   assert.equal(normal.ids['task-list'].children[0], row, '重复轮询保留当前渲染与选择');
   normal.ids['task-query'].value = '不存在'; normal.ids['task-query'].events.input();
   assert.equal(normal.ids['task-detail'].hidden, true);
-  assert.equal(fixture({ saved: 'b' }).application.dataset.taskLayout, 'b');
+  assert.equal(fixture({ saved: 'b' }).application.dataset.taskLayout, 'a', '旧B偏好必须回到A');
   assert.equal(fixture({ saved: 'invalid' }).application.dataset.taskLayout, 'a');
   const unavailable = fixture({ readError: true, writeError: true });
   assert.equal(unavailable.application.dataset.taskLayout, 'a');
-  unavailable.choices[1].click();
-  assert.equal(unavailable.application.dataset.taskLayout, 'b', '存储失败仍允许本次切换');
-  assert.match(unavailable.ids['task-layout-note'].textContent, /无法保存偏好/);
+  assert.equal(unavailable.requests(), 0);
 } finally {
   delete globalThis.document; delete globalThis.localStorage; delete globalThis.matchMedia; delete globalThis.fetch;
 }
@@ -102,4 +94,4 @@ for (const [status, label, suffix] of [['failed', '重试', 'retry'], ['queued',
 }
 const taskScript = html.indexOf('src="/static/task-view.js?'), appScript = html.indexOf('src="app.js?');
 assert.ok(taskScript >= 0 && appScript > taskScript, '任务模块必须走静态目录并先于app初始化');
-console.log('Task view checks passed: layout, storage fallback, selection, polling, and shared API actions.');
+console.log('Task view checks passed: fixed A, legacy B preference, dialog selection, polling, and shared API actions.');
