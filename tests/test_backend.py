@@ -2,6 +2,7 @@ import asyncio
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from app.store import Store
@@ -60,7 +61,7 @@ class StoreTests(unittest.TestCase):
         self.assertNotEqual(found[:4],[w['id'] for w in self.store.library(seed=456,limit=4)['items']])
 
     def test_favorites_survive_restart_and_resolve_old_work_alias(self):
-        self.store.save_work({'id':'legacy-test','nickname':'博主'}, ['v.mp4'])
+        self.store.save_work({'id':'legacy-test','nickname':'博主'}, ['UID123_博主_发布作品/2025-12-01 12.30.00-视频-博主-作品.mp4'])
         self.store.link_work(WORK_ID,'legacy-test')
         self.store.set_favorite(WORK_ID,True)
         page=Store(self.root).library(favorite=True)
@@ -182,6 +183,7 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
         self.service.retry(job["id"])
         self.assertEqual(self.store.task(job["id"])["status"], "queued")
 
+    @patch('app.main.time.time', new=lambda: 1767229200)
     async def test_scheduled_update_adds_new_work_skips_existing_and_pause_survives_reload(self):
         from unittest.mock import patch
         self.store.set_setting('quality_policy', 'upstream')
@@ -199,6 +201,7 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
             self.service.schedule()
             self.assertFalse(await self.service.process_one())
         with patch('app.store.time.time', return_value=next_due + 1):
+            self.store.set_setting('scheduler_next_release', 0)
             self.service.schedule()
             await self.service.process_one()
         self.assertEqual(self.core.download_calls, 2)
@@ -211,6 +214,7 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
             self.service.schedule()
             self.assertFalse(await self.service.process_one())
 
+    @patch('app.main.time.time', new=lambda: 1767229200)
     async def test_scheduling_still_runs_while_bulk_download_is_busy(self):
         started, release = asyncio.Event(), asyncio.Event()
         original = self.core.download

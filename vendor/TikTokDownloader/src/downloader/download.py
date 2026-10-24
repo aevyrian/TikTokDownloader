@@ -426,6 +426,9 @@ class Downloader:
                 )
             )
             return
+        suffixes = {suffix, "jpeg", "jpg", "png", "webp", "avif", "heic"}
+        if type_ == _("实况"):
+            suffixes.update({"mp4", "m4v", "mov", "mkv", "webm"})
         for index, img in enumerate(
             item["downloads"],
             start=1,
@@ -438,13 +441,17 @@ class Downloader:
                     )
                 )
                 break
-            elif self.is_exists(p := actual_root.with_name(f"{name}_{index}.{suffix}")):
+            p = actual_root.with_name(f"{name}_{index}.{suffix}")
+            paths = (actual_root.with_name(f"{name}_{index}.{extension}") for extension in suffixes)
+            existing = next((path for path in paths if path.is_symlink()
+                             or (path.is_file() and path.stat().st_size > 0)), None)
+            if existing is not None:
                 self.log.info(
                     _("【{type}】{name}_{index} 文件已存在，跳过下载").format(
                         type=type_, name=name, index=index
                     )
                 )
-                self.log.info(f"文件路径: {p.resolve()}", False)
+                self.log.info(f"文件路径: {existing.resolve()}", False)
                 skipped.add(id_)
                 continue
             tasks.append(
@@ -688,6 +695,10 @@ class Downloader:
                     case _:
                         raise DownloaderError
             except HTTPError as e:
+                code = response.status_code if response is not None else '未知'
+                self.last_error = f'媒体服务器返回 HTTP {code}'
+                if code in (403, 429):
+                    self.last_error += '，可能是地址过期、访问限制或请求过多，请稍后重试并检查Cookie'
                 self.log.warning(
                     _("响应码异常: {error_repr}").format(error_repr=repr(e))
                 )
@@ -698,13 +709,16 @@ class Downloader:
                 )
                 return False
             except RequestException as e:
+                self.last_error = f'媒体网络连接失败（{type(e).__name__}）'
                 self.log.warning(_("网络异常: {error_repr}").format(error_repr=repr(e)))
                 return False
             except CacheError as e:
+                self.last_error = '媒体续传校验失败，请重试'
                 self.delete(temp)
                 self.log.error(str(e))
                 return False
             except Exception as e:
+                self.last_error = f'媒体写入失败（{type(e).__name__}），请检查磁盘空间和目录权限'
                 self.log.error(
                     _(
                         "下载文件时发生预期之外的错误，请向作者反馈，错误信息: {error}"
@@ -747,6 +761,7 @@ class Downloader:
                     await f.write(bytes(buffer))
                 progress.remove_task(task_id)
         except RequestException as e:
+            self.last_error = f'传输中断（{type(e).__name__}），保留断点文件，可稍后重试'
             progress.remove_task(task_id)
             self.log.warning(
                 _("{show} 下载中断，错误信息：{error}").format(show=show, error=e)
@@ -755,6 +770,7 @@ class Downloader:
             await self.recorder.delete_id(id_)
             return False
         if content <= 0 or cache.stat().st_size != content:
+            self.last_error = '媒体长度不完整或服务器未提供可核对长度，保留断点文件'
             self.log.warning("下载文件长度不匹配或无法确认，保留临时文件以便重试")
             await self.recorder.delete_id(id_)
             return False

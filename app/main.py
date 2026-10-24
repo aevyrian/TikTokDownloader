@@ -17,12 +17,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
 from .core import Core, download_directory, normalize_input
-from .store import Store
+from .store import Store, FREQUENCIES, BEIJING
 from .legacy import LegacyIndex, recorded_download
 from .playback import PlaybackCache
 
 
-VERSION = "1.2.5"
+VERSION = "1.3.1"
 BASE = Path(__file__).resolve().parent
 
 
@@ -50,6 +50,8 @@ class JobService:
         self.queue_error = ""
         self.schedule_error = ""
         self.retry_delay = 2
+        self.active_task_id = None
+        self.active_download = None
 
     async def initialize(self):
         try:
@@ -62,9 +64,21 @@ class JobService:
         task = self.store.task(task_id)
         if not task:
             raise ValueError("任务不存在")
-        if task["status"] not in {"failed", "interrupted"}:
-            raise ValueError("只有失败或中断的任务可重试")
-        self.store.update_task(task_id, status="queued", message="已加入重试队列", completed=0)
+        return self.store.requeue_task(task_id)
+
+    async def cancel(self, task_id):
+        task = self.store.task(task_id)
+        if not task:
+            raise ValueError('任务不存在')
+        if task['status'] in {'completed', 'cancelled'}:
+            return task
+        self.store.update_task(task_id, status='cancelled', message='已取消，已保存作品和断点文件保留')
+        if self.active_task_id == task_id and self.active_download:
+            self.active_download.cancel()
+            try:
+                await self.active_download
+            except asyncio.CancelledError:
+                pass
         return self.store.task(task_id)
 
     def confirm(self, task_id):
@@ -118,8 +132,21 @@ class JobService:
         task = self.store.claim_task()
         if not task:
             return False
+        self.active_task_id = task['id']
+        self.active_download = asyncio.create_task(self.process_task(task))
+        try:
+            return await self.active_download
+        except asyncio.CancelledError:
+            if asyncio.current_task().cancelling():
+                raise
+            return True
+        finally:
+            self.active_task_id = self.active_download = None
+
+    async def process_task(self, task):
         async with self.lock:
-            if self.store.task(task["id"])["status"] == "cancelled":
+            current = self.store.task(task['id'])
+            if not current or current['status'] == 'cancelled':
                 return True
             try:
                 if not self.core.ready:
@@ -129,8 +156,14 @@ class JobService:
                 # 每次重试重新解析，避免使用已过期的媒体地址。
                 items = await self.core.parse(task["link"], task["kind"])
                 self.store.update_task(task["id"], preview=items)
-                pending = [item for item in items if not self.saved(item)]
-                self.store.update_task(task["id"], total=len(pending))
+                pending, failures = [], []
+                for item in items:
+                    try:
+                        if not self.saved(item):
+                            pending.append(item)
+                    except RuntimeError as exc:
+                        failures.append(f"{item['id']}：{safe_error(exc, self.store)}")
+                self.store.update_task(task["id"], total=len(pending) + len(failures))
                 if pending and not task["accept_quality"] and self.store.setting("quality_policy", "upstream") == "confirm":
                     self.store.update_task(task["id"], status="awaiting_confirmation", message="已解析。原项目已优选画质，但未自动判定水印；请确认采用当前版本")
                     return True
@@ -138,24 +171,32 @@ class JobService:
                 for item in pending:
                     self.store.update_task(task["id"], status="downloading", completed=completed,
                                            message=f"正在下载第 {completed + 1}/{len(pending)} 个作品：{item.get('desc') or item['id']}"[:160])
-                    files = await self.core.download(item)
-                    if not files or any(not (self.media_root / file).resolve().is_relative_to(self.media_root)
-                                        or not (self.media_root / file).is_file()
-                                        or (self.media_root / file).stat().st_size <= 0 for file in files):
-                        raise RuntimeError("文件未完整保存，任务不会标记完成，可重试")
+                    try:
+                        files = await self.core.download(item)
+                        if not files or any(not (self.media_root / file).resolve().is_relative_to(self.media_root)
+                                            or not (self.media_root / file).is_file()
+                                            or (self.media_root / file).stat().st_size <= 0 for file in files):
+                            raise RuntimeError("文件未完整保存，任务不会标记完成，可重试")
+                    except RuntimeError as exc:
+                        failures.append(f"{item['id']}：{safe_error(exc, self.store)}")
+                        continue
                     self.store.save_work(item, files)
                     completed += 1
                     self.store.update_task(task["id"], completed=completed)
-                self.store.update_task(task["id"], status="completed", completed=completed,
-                                       message=f"已完整保存 {completed} 个作品，跳过本库已有 {len(items) - completed} 个")
+                summary = f"已完整保存 {completed} 个作品，跳过本库已有 {len(items) - completed - len(failures)} 个"
+                if failures:
+                    summary += f"；{len(failures)} 个未完成，可重试：" + '；'.join(failures[:3])
+                self.store.update_task(task["id"], status="failed" if failures else "completed", completed=completed, message=summary[:1500])
                 if task["author_id"] and self.store.author(task["author_id"]):
                     name = items[0].get("nickname", "") if items else ""
-                    values = {"last_checked": time.time(), "last_error": ""}
+                    values = {"last_checked": time.time(), "last_error": summary[:500] if failures else ""}
                     if name:
                         values["name"] = name
                     self.store.patch_author(task["author_id"], **values)
             except asyncio.CancelledError:
-                self.store.update_task(task["id"], status="interrupted", message="服务停止，任务已保留，可重试")
+                current = self.store.task(task['id'])
+                if current and current['status'] != 'cancelled':
+                    self.store.update_task(task["id"], status="interrupted", message="服务停止，任务已保留，可重试")
                 raise
             except Exception as exc:
                 message = safe_error(exc, self.store)
@@ -165,9 +206,13 @@ class JobService:
         return True
 
     def schedule(self):
-        for author in self.store.due_authors():
+        now = time.time()
+        if not 8 <= datetime.fromtimestamp(now, BEIJING).hour < 18 or now < self.store.setting('scheduler_next_release', 0):
+            return
+        for author in sorted(self.store.due_authors(), key=lambda a: a['next_check'])[:1]:
             self.store.create_task(author["url"], "author", author_id=author["id"])
             self.store.mark_author_scheduled(author["id"])
+            self.store.set_setting('scheduler_next_release', now + 600 + secrets.randbelow(1201))
 
     async def run(self):
         self.running = True
@@ -215,7 +260,7 @@ class SettingsInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     cookie: str | None = Field(default=None, max_length=30000)
     quality_policy: str | None = None
-    interval_minutes: int | None = Field(default=None, ge=5, le=10080)
+    interval_minutes: int | None = Field(default=None, ge=5, le=525600)
     download_dir: str | None = Field(default=None, max_length=1000)
 
 
@@ -229,15 +274,24 @@ class AuthorInput(BaseModel):
     url: str = Field(min_length=1, max_length=2000)
     name: str = Field(default="", max_length=100)
     enabled: bool = False
-    interval_minutes: int | None = Field(default=None, ge=5, le=43200)
-    frequency: Literal["once", "daily", "weekly", "monthly"] | None = None
+    favorite: bool | None = None
+    interval_minutes: int | None = Field(default=None, ge=5, le=525600)
+    frequency: Literal["once", "daily", "three_days", "weekly", "monthly", "quarterly", "yearly"] | None = None
 
 
 class AuthorPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool | None = None
-    interval_minutes: int | None = Field(default=None, ge=5, le=43200)
-    frequency: Literal["once", "daily", "weekly", "monthly"] | None = None
+    interval_minutes: int | None = Field(default=None, ge=5, le=525600)
+    frequency: Literal["once", "daily", "three_days", "weekly", "monthly", "quarterly", "yearly"] | None = None
+    starred: bool | None = None
+    favorite: bool | None = None
+
+
+class TaskBatchInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    action: Literal['retry', 'cancel', 'delete']
+    ids: list[str] = Field(min_length=1, max_length=1000)
 
 
 class FavoriteInput(BaseModel):
@@ -261,6 +315,7 @@ def make_app(data_dir=None, media_dir=None, token=None, core=None, legacy_dir=No
 
     @asynccontextmanager
     async def lifespan(app):
+        store.migrate_subscription_schedule()
         worker = asyncio.create_task(service.run())
         service.worker = worker
         if legacy.root and (not store.legacy_count() or legacy.state.get('status') in {'scanning', 'interrupted'}):
@@ -402,11 +457,33 @@ def make_app(data_dir=None, media_dir=None, token=None, core=None, legacy_dir=No
 
     @app.post("/api/tasks/{task_id}/cancel", dependencies=[Depends(authorize)])
     async def cancel(task_id: str):
-        task = store.task(task_id)
-        if not task or task["status"] not in {"queued", "awaiting_confirmation", "failed", "interrupted"}:
-            raise ValueError("当前任务正在处理，不能在写文件过程中取消")
-        store.update_task(task_id, status="cancelled", message="已取消，已下载作品保留")
-        return public_task(store.task(task_id))
+        return public_task(await service.cancel(task_id))
+
+    @app.delete('/api/tasks/{task_id}', dependencies=[Depends(authorize)])
+    async def delete_task(task_id: str):
+        await service.cancel(task_id)
+        store.delete_task(task_id)
+        return {'deleted': task_id}
+
+    @app.post('/api/tasks/batch', dependencies=[Depends(authorize)])
+    async def task_batch(body: TaskBatchInput):
+        changed, skipped = [], []
+        for task_id in dict.fromkeys(body.ids):
+            try:
+                if body.action == 'retry':
+                    service.retry(task_id)
+                elif body.action == 'cancel':
+                    task = store.task(task_id)
+                    if not task or task['status'] in {'completed', 'cancelled'}:
+                        raise ValueError('任务已结束或不存在')
+                    await service.cancel(task_id)
+                else:
+                    await service.cancel(task_id)
+                    store.delete_task(task_id)
+                changed.append(task_id)
+            except ValueError as exc:
+                skipped.append({'id': task_id, 'reason': str(exc)})
+        return {'changed': changed, 'skipped': skipped}
 
     @app.get("/api/library", dependencies=[Depends(authorize)])
     def library(q: str = "", author: str = "", offset: int = Query(default=0, ge=0), limit: int = Query(default=30, ge=1, le=100), seed: int | None = Query(default=None,ge=0,le=4294967295), ceiling: int | None = Query(default=None,ge=0), favorite: bool = False):
@@ -444,12 +521,18 @@ def make_app(data_dir=None, media_dir=None, token=None, core=None, legacy_dir=No
         if "\n" in url:
             raise ValueError("每次添加一个博主")
         author_id = hashlib.sha256(url.encode()).hexdigest()[:16]
-        minutes = {"once": 1440, "daily": 1440, "weekly": 10080, "monthly": 43200}
+        if body.favorite is not None:
+            existing = next((a for a in store.authors() if a['url'] == url), None)
+            if existing:
+                return store.patch_author(existing['id'], favorite=body.favorite)
+        minutes = FREQUENCIES
         author = store.save_author(author_id, url, body.name,
                                    body.frequency != "once" if body.frequency else body.enabled,
-                                   minutes[body.frequency] if body.frequency else body.interval_minutes or store.setting("interval_minutes", 1440))
+                                   minutes[body.frequency] if body.frequency else body.interval_minutes or store.setting("interval_minutes", 129600))
         if body.frequency and author["enabled"]:
-            store.mark_author_scheduled(author["id"])
+            store.mark_author_scheduled(author["id"], reset=True)
+        if body.favorite is not None:
+            store.patch_author(author['id'], favorite=body.favorite)
         return store.author(author["id"])
 
     @app.patch("/api/authors/{author_id}", dependencies=[Depends(authorize)])
@@ -459,14 +542,12 @@ def make_app(data_dir=None, media_dir=None, token=None, core=None, legacy_dir=No
         values = body.model_dump(exclude_none=True)
         frequency = values.pop("frequency", None)
         if frequency:
-            values.update(enabled=frequency != "once", interval_minutes={"once": 1440, "daily": 1440, "weekly": 10080, "monthly": 43200}[frequency])
+            values.update(enabled=frequency != "once", interval_minutes=FREQUENCIES[frequency])
         if not values:
             raise ValueError("没有需要修改的设置")
-        if body.enabled is True:
-            values["next_check"] = 0
         author = store.patch_author(author_id, **values)
-        if frequency and author["enabled"]:
-            store.mark_author_scheduled(author_id)
+        if (frequency or body.enabled is True or body.interval_minutes) and author["enabled"]:
+            store.mark_author_scheduled(author_id, reset=True)
         return store.author(author_id)
 
     @app.post("/api/authors/{author_id}/check", dependencies=[Depends(authorize)])
@@ -474,7 +555,7 @@ def make_app(data_dir=None, media_dir=None, token=None, core=None, legacy_dir=No
         author = store.author(author_id)
         if not author:
             raise HTTPException(404, "博主不存在")
-        store.mark_author_scheduled(author_id)
+        store.mark_author_scheduled(author_id, reset=True)
         return public_task(store.create_task(author["url"], "author", author_id=author_id))
 
     def media_path(work_id, index):

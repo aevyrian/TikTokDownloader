@@ -24,7 +24,9 @@
   if (typeof module !== 'undefined' && module.exports) { module.exports = { mediaURL, switchView, moveGallery, isVideoFile, authorInitial, keyError, taskTitle, playVisible, applySound, releasePlayback, preloadVideos }; return; }
   const $ = id => document.getElementById(id);
   if (location.protocol === 'file:') { $('connect-form').hidden = true; $('local-preview').hidden = false; return; }
-  const state = { token: localStorage.getItem('library_access_key') || '', muted:true, auth: null, view: 'library', items: [], total: 0, generation: 0, navigation: 0, busy: false };
+  const state = { token: localStorage.getItem('library_access_key') || '', muted:false, favoriteKind:'works', auth: null, view: 'library', items: [], total: 0, generation: 0, navigation: 0, busy: false };
+  const frequencies={once:'不订阅',three_days:'每3天更新',weekly:'每7天更新',monthly:'每月更新',quarterly:'每季度更新',yearly:'每年更新'};
+  const frequencyValues={1440:'three_days',4320:'three_days',10080:'weekly',43200:'monthly',129600:'quarterly',525600:'yearly'};
   const statusNames = { queued: '已排队', paused:'已暂停', parsing: '正在解析', awaiting_confirmation: '等待画质确认', downloading: '正在下载', completed: '完整保存', failed: '失败', interrupted: '已中断', cancelled: '已取消' };
   const titles = { library: ['作品库', 'FOR YOU'], favorites:['收藏','SAVED WORKS'], tasks: ['下载', 'DOWNLOADS'], authors: ['订阅', 'CREATORS'], settings: ['设置', 'LIBRARY SETTINGS'] };
   function element(tag, className, text) { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = String(text); return node; }
@@ -57,7 +59,11 @@
     state.token = ''; localStorage.removeItem('library_access_key'); state.generation++; state.navigation++;
     $('application').hidden = true; $('connection').hidden = false;
     $('access-key').value = ''; $('script-token').value = ''; $('cookie').value = ''; $('feed').replaceChildren();
-    $('confirm-key').value = ''; $('legacy-key').value = ''; $('admin-key-form').reset(); connectionMode();
+    $('confirm-key').value = ''; $('legacy-key').value = ''; $('admin-key-form').reset();
+    taskView.update([]);
+    for (const id of ['task-detail', 'task-dialog-body']) $(id).replaceChildren();
+    for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
+    connectionMode();
   }
   function connectionMode() {
     const setup = Boolean(state.auth?.setup_required);
@@ -116,6 +122,9 @@
     const navigation = ++state.navigation;
     if(view==='favorites'&&state.view!==view){$('search-query').value='';$('search-author').value='';}
     state.view = switchView(view, document.querySelectorAll('video'));
+    if($('favorite-toolbar'))$('favorite-toolbar').hidden=state.view!=='favorites';
+    if($('feed'))$('feed').hidden=state.view==='favorites'&&state.favoriteKind==='authors';
+    if($('favorite-authors'))$('favorite-authors').hidden=state.view!=='favorites'||state.favoriteKind!=='authors';
     $('application').dataset.view = state.view;
     state.generation++;
     for (const panel of document.querySelectorAll('.view')) panel.hidden = panel.id !== `view-${state.view==='favorites'?'library':state.view}`;
@@ -133,7 +142,7 @@
   function syncPlayback(){
     playbackFrame=0;if(restoringFullscreen)return;const feed=$('feed'),cards=[...feed.querySelectorAll('.work')];
     const index=Math.max(0,Math.min(cards.length-1,Math.round(feed.scrollTop/feed.clientHeight)));
-    const enabled=!document.hidden&&['library','favorites'].includes(state.view);
+    const enabled=!document.hidden&&!feed.hidden&&['library','favorites'].includes(state.view);
     const card=enabled?(document.fullscreenElement?.closest('.work')||cards[index]):null;
     const selected=card?cards.indexOf(card):-1;
     if(card!==activeCard){clearTimeout(warmTimer);activeCard=card;}
@@ -257,6 +266,7 @@
     feedObserver.observe(card); return card;
   }
   async function loadLibrary(reset = false) {
+    if(state.view==='favorites'&&state.favoriteKind==='authors')return loadAuthors(true);
     if(state.loadingLibrary&&!reset)return;
     state.loadingLibrary = true;
     const generation = ++state.generation;
@@ -293,7 +303,7 @@
     }
     content.append(element('p', 'hint', `${task.kind==='author'?'博主全部作品':'单个作品'} · 更新于 ${formatDate(task.updated_at || task.created_at)} · 任务 ${task.id}`));
     const actions = element('div', 'record-actions');
-    if (['failed', 'interrupted'].includes(task.status)) actions.append(action('重试', async () => { await api(`/api/tasks/${encodeURIComponent(task.id)}/retry`, 'POST'); await loadTasks(); }));
+    if (['failed', 'interrupted', 'cancelled'].includes(task.status)) actions.append(action('重试', async () => { await api(`/api/tasks/${encodeURIComponent(task.id)}/retry`, 'POST'); await loadTasks(); }));
     if (task.status === 'awaiting_confirmation') {
       content.append(element('p', 'hint', '目标画质或无水印尚不能确认。接受仅适用于此任务，也可取消。'));
       if (Array.isArray(task.preview)) {
@@ -303,40 +313,45 @@
         }
       }
       actions.append(action('接受此任务原项目优选', async () => { await api(`/api/tasks/${encodeURIComponent(task.id)}/confirm`, 'POST'); await loadTasks(); }, true));
-      actions.append(action('取消此任务', async () => { await api(`/api/tasks/${encodeURIComponent(task.id)}/cancel`, 'POST'); await loadTasks(); }));
     }
-    if (['queued', 'failed', 'interrupted'].includes(task.status)) actions.append(action('取消任务', async () => { await api(`/api/tasks/${encodeURIComponent(task.id)}/cancel`, 'POST'); await loadTasks(); }));
+    if (!['completed','cancelled'].includes(task.status)) actions.append(action('取消', async () => { await api(`/api/tasks/${encodeURIComponent(task.id)}/cancel`, 'POST'); await loadTasks(); }));
+    actions.append(action('删除',async()=>{await api(`/api/tasks/${encodeURIComponent(task.id)}`,'DELETE');await loadTasks();notice('任务记录已删除，媒体文件保留。');}));
     card.append(content, actions); return card;
   }
-  const taskView = window.CloudriftTaskView.create({ application: $('application'), makeTaskCard: taskCard, title: taskTitle });
+  const taskView = window.CloudriftTaskView.create({ application: $('application'), makeTaskCard: taskCard, title: taskTitle, onBatch:async(action,ids)=>{
+    try{let changed=0,skipped=0;for(let i=0;i<ids.length;i+=1000){const result=await api('/api/tasks/batch','POST',{action,ids:ids.slice(i,i+1000)});changed+=result.changed.length;skipped+=result.skipped.length;}await loadTasks();notice(`已处理 ${changed} 个任务${skipped?`，${skipped} 个因状态变化或同链接正在处理而跳过`:''}。媒体文件保留。`);}catch(error){notice(error.message,true);}
+  } });
   async function loadTasks() {
     const navigation = state.navigation, tasks = await api('/api/tasks');
     if (navigation === state.navigation && state.view === 'tasks') taskView.update(tasks);
   }
-  async function loadAuthors() {
+  async function loadAuthors(favoritesOnly=false) {
     const navigation = state.navigation, authors = await api('/api/authors/history');
-    if (navigation !== state.navigation || state.view !== 'authors') return;
-    $('author-list').replaceChildren();
-    $('author-list').append(element('h2','creator-heading',`订阅中 · ${authors.filter(a=>a.enabled).length}`));
-    if(!authors.some(a=>a.enabled))$('author-list').append(element('p','muted','暂未设置追更；下载一次的博主会留在下方历史里。'));
-    let historyShown=false;
-    for (const author of authors) {
-      if(!author.enabled&&!historyShown){$('author-list').append(element('h2','creator-heading','历史博主'));historyShown=true;}
+    if (navigation !== state.navigation || state.view !== (favoritesOnly?'favorites':'authors')) return;
+    const container=$(favoritesOnly?'favorite-author-list':'author-list');container.replaceChildren();
+    const order=$('author-sort').value,visible=authors.filter(a=>!favoritesOnly||a.favorite);
+    visible.sort((a,b)=>Number(Boolean(b.starred))-Number(Boolean(a.starred))||(order==='name'?(a.name||'').localeCompare(b.name||'','zh-CN'):order==='next'?(a.enabled?a.next_check:Infinity)-(b.enabled?b.next_check:Infinity):order==='last'?new Date(typeof b.last_checked==='number'?b.last_checked*1000:b.last_checked||0)-new Date(typeof a.last_checked==='number'?a.last_checked*1000:a.last_checked||0):Number(b.enabled)-Number(a.enabled)));
+    container.append(element('h2','creator-heading',favoritesOnly?'收藏博主':`订阅中 · ${authors.filter(a=>a.enabled).length}　历史博主 · ${authors.filter(a=>!a.enabled).length}`));
+    async function updateAuthor(author,values){let saved=author;if(!author.registered)saved=await api('/api/authors','POST',{url:author.url,name:author.name,frequency:'once'});await api(`/api/authors/${encodeURIComponent(saved.id)}`,'PATCH',values);await loadAuthors(favoritesOnly);}
+    for (const author of visible) {
       const card = element('article', 'record'); const content = element('div', 'record-content'); const heading = element('div', 'record-title');
-      const current = author.enabled ? ({1440:'daily',10080:'weekly',43200:'monthly'}[author.interval_minutes] || 'legacy') : 'once';
-      const names = {once:'不订阅，仅下载一次',daily:'每天更新',weekly:'每周更新',monthly:'每月更新',legacy:'沿用原追更计划'};
+      const current = author.enabled ? (frequencyValues[author.interval_minutes] || 'quarterly') : 'once';
+      const names = frequencies;
       heading.append(element('h2', '', author.name || '未命名博主'), element('span', `badge ${author.enabled ? 'good' : ''}`, names[current]));
       const link=element('a','source-link','查看博主主页 ↗');link.href=author.url;link.target='_blank';link.rel='noopener noreferrer';
       content.append(heading,link,element('p', 'muted', `上次下载／检查 ${formatDate(author.last_checked)}`), element('p', 'hint', author.enabled ? `下次更新 ${formatDate(author.next_check)}` : '已留在历史里，不会自动下载。'));
       if (author.last_error) content.append(element('p', 'error', author.last_error));
       const actions = element('div', 'record-actions');
+      const star=action(author.starred?'★ 星标':'☆ 星标',()=>updateAuthor(author,{starred:!author.starred}));star.classList.toggle('is-starred',Boolean(author.starred));star.setAttribute('aria-pressed',String(Boolean(author.starred)));
+      const favorite=action(author.favorite?'♥ 已收藏':'♡ 收藏博主',()=>updateAuthor(author,{favorite:!author.favorite}));favorite.setAttribute('aria-pressed',String(Boolean(author.favorite)));favorite.classList.toggle('is-favorite',Boolean(author.favorite));
+      actions.append(star,favorite,action('查看已存作品',async()=>{await navigate('library');const select=$('search-author');if(![...select.options].some(o=>o.value===author.name))select.append(new Option(author.name,author.name));select.value=author.name;$('search-query').value='';await loadLibrary(true);}));
       const frequency = element('select'); frequency.setAttribute('aria-label', `${author.name || '此博主'}的后续更新`);
       for (const [value, label] of Object.entries(names)) if (value !== 'legacy' || current === 'legacy') frequency.append(new Option(label, value));
       frequency.value = current;
       actions.append(frequency, action('保存方式', async () => { if (frequency.value === 'legacy') return; if(author.registered)await api(`/api/authors/${encodeURIComponent(author.id)}`, 'PATCH', {frequency:frequency.value});else await api('/api/authors','POST',{url:author.url,name:author.name,frequency:frequency.value}); await loadAuthors(); notice('后续更新方式已保存。'); }), action('现在补齐作品', async () => { if(author.registered)await api(`/api/authors/${encodeURIComponent(author.id)}/check`, 'POST');else await api('/api/tasks','POST',{link:author.url,kind:'author'}); await navigate('tasks'); notice('博主下载已提交，已有作品自动跳过。'); }));
-      card.append(content, actions); $('author-list').append(card);
+      card.append(content, actions); container.append(card);
     }
-    if(!authors.length)empty($('author-list'),'还没有历史博主','从抖音发送博主或在这里添加，下载过的博主会自动留在这里。');
+    if(!visible.length)empty(container,favoritesOnly?'还没有收藏博主':'还没有历史博主','在订阅页点“收藏博主”，或添加博主页。收藏不会自动开启下载。');
   }
   async function loadSettings() {
     const navigation = state.navigation;
@@ -379,6 +394,19 @@
   paintSound();
   $('sound-toggle').addEventListener('click',()=>{state.muted=!state.muted;applySound($('feed').querySelectorAll('video'),state.muted);paintSound();const v=activeCard?.querySelector('video');if(v){v.playbackActive=false;playVisible(v,true);}});
   $('refresh-tasks').addEventListener('click', () => loadTasks().catch(error => notice(error.message, true)));
+  $('author-sort').addEventListener('change',()=>loadAuthors().catch(error=>notice(error.message,true)));
+  for(const button of document.querySelectorAll('[data-favorite-kind]'))button.addEventListener('click',async()=>{
+    state.generation++;
+    state.favoriteKind=button.dataset.favoriteKind;
+    for(const tab of document.querySelectorAll('[data-favorite-kind]'))tab.setAttribute('aria-pressed',String(tab===button));
+    for(const video of $('feed').querySelectorAll('video'))playVisible(video,false);
+    $('feed').hidden=state.favoriteKind==='authors';$('favorite-authors').hidden=state.favoriteKind!=='authors';
+    try{await loadLibrary(true);}catch(error){notice(error.message,true);}
+  });
+  $('favorite-author-form').addEventListener('submit',async event=>{
+    event.preventDefault();const button=event.target.querySelector('button');button.disabled=true;
+    try{const url=$('favorite-author-url').value.trim();await api('/api/authors','POST',{url,favorite:true});event.target.reset();await loadAuthors(true);notice('博主已收藏，原订阅设置保留。');}catch(error){notice(error.message,true);}finally{button.disabled=false;}
+  });
   $('open-submit').addEventListener('click', () => { $('submit-message').textContent = ''; $('submit-dialog').showModal(); });
   $('close-submit').addEventListener('click', () => $('submit-dialog').close());
   $('task-form').addEventListener('submit', async event => {

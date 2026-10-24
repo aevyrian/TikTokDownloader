@@ -14,13 +14,25 @@
     return tasks.find(task => String(task.id) === String(id)) || tasks.find(task => ATTENTION.includes(task.status)) || tasks[0];
   }
   function taskCounts(tasks) { return Object.fromEntries(FILTERS.map(([filter]) => [filter, tasks.filter(task => groupMatches(task, filter)).length])); }
-  function create({ application, makeTaskCard, title }) {
+  function bulkEligible(task, action) {
+    return action === 'retry' ? ['failed','interrupted','cancelled'].includes(task.status) : action === 'cancel' ? !['completed','cancelled'].includes(task.status) : true;
+  }
+  function create({ application, makeTaskCard, title, onBatch = async () => {} }) {
     const byId = id => document.getElementById(id);
     const node = (tag, className, text) => { const result = document.createElement(tag); if (className) result.className = className; if (text !== undefined) result.textContent = String(text); return result; };
     const list = byId('task-list'), detail = byId('task-detail'), dialog = byId('task-detail-dialog'), dialogBody = byId('task-dialog-body');
     const query = byId('task-query'), filters = byId('task-filters'), summary = byId('task-summary');
     const filterButtons = new Map(), summaryButtons = new Map();
     let tasks = [], filter = 'all', selected = null, lastData = null;
+    const bulkButtons = new Map();
+    if (byId('task-bulk-actions')) for (const [value,label] of [['retry','全部重试'],['cancel','全部取消'],['delete','全部删除']]) {
+      const button=node('button','secondary',label);button.type='button';
+      button.title='仅处理当前筛选和搜索结果；删除只移除任务记录，保留媒体文件';
+      button.addEventListener('click',async()=>{
+        const ids=filterTasks(tasks,filter,query.value,title).filter(task=>bulkEligible(task,value)).map(task=>task.id);
+        button.disabled=true;try{await onBatch(value,ids);}finally{render();}
+      });byId('task-bulk-actions').append(button);bulkButtons.set(value,button);
+    }
     application.dataset.taskLayout = 'a';
     for (const [value, label] of FILTERS) {
       const button = node('button', 'task-filter'); button.type = 'button'; button.dataset.filter = value;
@@ -51,6 +63,7 @@
     }
     function render() {
       const counts = taskCounts(tasks), visible = filterTasks(tasks, filter, query.value, title);
+      for(const [value,button] of bulkButtons)button.disabled=!visible.some(task=>bulkEligible(task,value));
       for (const [value, button] of filterButtons) { button.setAttribute('aria-pressed', String(filter === value)); button.lastElementChild.textContent = counts[value]; }
       for (const [value, button] of summaryButtons) button.querySelector('strong').textContent = String(counts[value]).padStart(2, '0');
       byId('task-result-count').textContent = `${visible.length} 个任务`;
@@ -78,7 +91,7 @@
       }
     };
   }
-  const exports = { groupMatches, filterTasks, selectedTask, taskCounts, create };
+  const exports = { groupMatches, filterTasks, selectedTask, taskCounts, bulkEligible, create };
   if (typeof module !== 'undefined' && module.exports) module.exports = exports;
   else window.CloudriftTaskView = exports;
 })();

@@ -141,6 +141,39 @@ class PlaybackTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(encode.await_count,1)
         self.assertTrue(record['software']);self.assertEqual(temporary.read_bytes(),b'playing')
 
+    async def test_hardware_timeout_kills_process_and_falls_back_without_clients(self):
+        self.cache.hardware=True;temporary=self.root/'timeout.mp4';temporary.write_bytes(b'partial-gpu')
+        record={'clients':0,'duration':9,'requested':time.monotonic(),'progress':50}
+        hardware=Mock(returncode=None);hardware.stdout.readline=AsyncMock(side_effect=asyncio.TimeoutError)
+        hardware.wait=AsyncMock()
+        software=Mock(returncode=0);software.stdout.readline=AsyncMock(return_value=b'');software.wait=AsyncMock()
+        async def spawn(*args,**kwargs):
+            if '-hwaccel' in args:return hardware
+            self.assertFalse(temporary.exists());temporary.write_bytes(b'software-copy');return software
+        with patch('app.playback.asyncio.create_subprocess_exec',side_effect=spawn),patch.object(self.cache,'probe',AsyncMock(return_value=streams('h264'))):
+            try:await self.cache.encode(self.source,temporary,record)
+            except asyncio.TimeoutError:self.fail('Hardware timeout must fall back to software')
+        hardware.kill.assert_called_once();hardware.wait.assert_awaited_once()
+        self.assertTrue(record['software']);self.assertTrue(self.cache.hardware)
+        self.assertEqual(temporary.read_bytes(),b'software-copy');self.assertEqual(self.source.read_bytes(),b'original-hevc')
+
+    async def test_hardware_timeout_preserves_active_stream_until_software_retry(self):
+        self.cache.hardware=True;temporary=self.root/'playing-timeout.mp4';temporary.write_bytes(b'playing')
+        record={'clients':1,'duration':9,'requested':time.monotonic(),'progress':50}
+        process=Mock(returncode=None);process.stdout.readline=AsyncMock(side_effect=asyncio.TimeoutError);process.wait=AsyncMock()
+        with patch('app.playback.asyncio.create_subprocess_exec',AsyncMock(return_value=process)) as spawn:
+            try:
+                with self.assertRaisesRegex(RuntimeError,'重试'):await self.cache.encode(self.source,temporary,record)
+            except asyncio.TimeoutError:self.fail('Active hardware timeout must offer a software retry')
+            self.assertEqual(spawn.await_count,1)
+        process.kill.assert_called_once();process.wait.assert_awaited_once()
+        self.assertTrue(record['software']);self.assertEqual(temporary.read_bytes(),b'playing')
+        record['clients']=0
+        process=Mock(returncode=0);process.stdout.readline=AsyncMock(return_value=b'');process.wait=AsyncMock()
+        with patch('app.playback.asyncio.create_subprocess_exec',AsyncMock(return_value=process)) as spawn,patch.object(self.cache,'probe',AsyncMock(return_value=streams('h264'))):
+            await self.cache.encode(self.source,temporary,record)
+        self.assertNotIn('-hwaccel',spawn.await_args.args)
+
     async def test_probe_timeout_terminates_process_and_has_actionable_message(self):
         process=Mock(returncode=None);process.communicate=AsyncMock(side_effect=asyncio.TimeoutError)
         process.wait=AsyncMock()
@@ -149,10 +182,14 @@ class PlaybackTests(unittest.IsolatedAsyncioTestCase):
         process.kill.assert_called_once();process.wait.assert_awaited_once()
 
     async def test_abandoned_preparation_releases_the_encoder(self):
+        self.cache.hardware=True
         process=Mock(returncode=None);process.stdout.readline=AsyncMock(return_value=b'progress=continue\n');process.wait=AsyncMock()
-        with patch('app.playback.asyncio.create_subprocess_exec',AsyncMock(return_value=process)):
+        record={'duration':9,'requested':time.monotonic()-20,'clients':0}
+        with patch('app.playback.asyncio.create_subprocess_exec',AsyncMock(return_value=process)) as spawn:
             with self.assertRaises(asyncio.CancelledError):
-                await self.cache.encode(self.source,self.root/'part.mp4',{'duration':9,'requested':time.monotonic()-20,'clients':0})
+                await self.cache.encode(self.source,self.root/'part.mp4',record)
+            self.assertEqual(spawn.await_count,1)
+        self.assertFalse(record.get('software'))
         process.kill.assert_called_once();process.wait.assert_awaited_once()
 
     @unittest.skipIf(os.name=='nt','Requires POSIX rename of an open stream; run on Linux NAS')

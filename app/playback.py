@@ -130,7 +130,7 @@ class PlaybackCache:
     async def encode(self, path, temporary, record):
         hardware=self.hardware and not record.get('software')
         try:await self._encode(path,temporary,record,hardware)
-        except RuntimeError:
+        except (RuntimeError, asyncio.TimeoutError):
             if not hardware:raise
             record['software']=True
             if record.get('clients'):raise RuntimeError('核显转换暂时失败，请点重试播放；将改用软件兼容，原文件已保留')

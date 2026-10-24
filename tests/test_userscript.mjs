@@ -8,7 +8,7 @@ const web = new URL('../app/static/app.js', import.meta.url);
 assert.ok(existsSync(script), '发送脚本尚未实现');
 const { resolveTargets, normalizeServer, togglePanel, defaultKind, senderPosition, pageTargets, subscriptionState } = require(fileURLToPath(script));
 const subscribedURL='https://www.douyin.com/user/MS4wLjABAAAA_subscriber';
-for(const [minutes,frequency] of [[1440,'daily'],[10080,'weekly'],[43200,'monthly']]){const found=subscriptionState([{id:'creator',url:subscribedURL,enabled:true,interval_minutes:minutes}],subscribedURL);assert.equal(found.enabled,true);assert.equal(found.frequency,frequency);}
+for(const [minutes,frequency] of [[4320,'three_days'],[10080,'weekly'],[43200,'monthly'],[129600,'quarterly'],[525600,'yearly']]){const found=subscriptionState([{id:'creator',url:subscribedURL,enabled:true,interval_minutes:minutes}],subscribedURL);assert.equal(found.enabled,true);assert.equal(found.frequency,frequency);}
 assert.equal(subscriptionState([{url:subscribedURL,enabled:false}],subscribedURL).enabled,false);
 assert.equal(subscriptionState([{url:subscribedURL,enabled:true}],'https://www.douyin.com/user/MS4wLjABAAAA_someone_else').author,null,'切换博主后不能沿用上一个红心');
 assert.equal(defaultKind(undefined),'author','首次默认下载博主全部作品');

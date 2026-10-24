@@ -52,8 +52,11 @@ class FollowupTests(unittest.TestCase):
                                       (datetime(2028, 1, 31, 10), datetime(2028, 2, 29, 10)),
                                       (datetime(2027, 12, 15, 10), datetime(2028, 1, 15, 10))):
                 with patch("app.store.time.time", return_value=current.timestamp()):
-                    store.mark_author_scheduled("monthly")
-                self.assertEqual(store.author("monthly")["next_check"], expected.timestamp())
+                    store.mark_author_scheduled("monthly", reset=True)
+                result=store.author('monthly')
+                self.assertEqual(result['schedule_until'], expected.timestamp()+60)
+                self.assertGreater(result['next_check'], current.timestamp())
+                self.assertLess(result['next_check'], result['schedule_until'])
 
     def test_search_finds_description_author_and_work_id(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -142,8 +142,10 @@ class Core:
         except RuntimeError:
             # 图集中断后作品级记录可能存在，清掉它才能让原下载器补齐缺失图片。
             await self.parser.downloader.recorder.delete_id(str(item["id"]))
+            self.parser.downloader.last_error = ''
             success = await self.parser.downloader.run([item.copy()], type_="detail", tiktok=False)
             if success is not True:
-                raise RuntimeError("下载器报告失败，作品未登记完成，可重试")
+                reason = self.parser.downloader.last_error or '下载器未提供具体原因'
+                raise RuntimeError(f"下载未完成：{reason}。已保存作品保留，重试会重新解析地址并跳过已有作品")
             files = verified_files(self.media_dir, item)
         return [(self.media_dir / file).relative_to(self.media_root).as_posix() for file in files]

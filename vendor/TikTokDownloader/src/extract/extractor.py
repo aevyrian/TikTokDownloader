@@ -583,7 +583,8 @@ class Extractor:
                 if result := await self.__request_video_size(original_url):
                     original_size, original_url = result
                     if original_size >= bitrate_size:
-                        url = original_url
+                        # 临时CDN地址会在批量排队时失效，真正下载时再由官方入口获取新跳转。
+                        url = self.generate_original_quality_url(uri)
         return height, width, url
 
     @Retry.retry

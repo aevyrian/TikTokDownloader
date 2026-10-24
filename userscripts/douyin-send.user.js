@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cloudrift Sender
 // @namespace    douyin-local-library
-// @version      1.5.1
+// @version      1.6.0
 // @description  一键下载作品或博主，按日、周、月订阅更新并同步网站收藏状态。
 // @match        https://www.douyin.com/*
 // @match        https://douyin.com/*
@@ -68,7 +68,7 @@
       panelLeft: clamp(left >= panelWidth + 24 ? left - panelWidth - 12 : left + 48, 12, viewport.width - panelWidth - 12),
       panelTop: clamp(top, 12, viewport.height - panelHeight - 12)};
   }
-  function subscriptionState(authors,url) { const author=authors.find(a=>resolveTargets(a.url).author===url)||null;return {author,enabled:Boolean(author?.enabled),frequency:author?.interval_minutes===1440?'daily':author?.interval_minutes===43200?'monthly':'weekly'}; }
+  function subscriptionState(authors,url) { const author=authors.find(a=>resolveTargets(a.url).author===url)||null;return {author,enabled:Boolean(author?.enabled),frequency:({4320:'three_days',10080:'weekly',43200:'monthly',129600:'quarterly',525600:'yearly'}[author?.interval_minutes]||'quarterly')}; }
   if (typeof module !== 'undefined' && module.exports) { module.exports = { resolveTargets, normalizeServer, togglePanel, defaultKind, senderPosition, pageTargets, subscriptionState }; return; }
 
   const host = document.createElement('div');
@@ -88,7 +88,7 @@
   const creator = document.createElement('strong'); creator.className = 'creator';
   const creatorRow=document.createElement('div');creatorRow.className='creator-row';
   const frequency=document.createElement('select');frequency.setAttribute('aria-label','博主更新周期');
-  for(const [value,text] of [['daily','每天更新'],['weekly','每周更新'],['monthly','每月更新']]){const option=document.createElement('option');option.value=value;option.textContent=text;frequency.append(option);}frequency.value='weekly';
+  for(const [value,text] of [['three_days','每3天更新'],['weekly','每7天更新'],['monthly','每月更新'],['quarterly','每季度更新'],['yearly','每年更新']]){const option=document.createElement('option');option.value=value;option.textContent=text;frequency.append(option);}frequency.value='quarterly';
   const subscribe=document.createElement('button');subscribe.className='subscribe';subscribe.textContent='♡';subscribe.setAttribute('aria-label','订阅博主');subscribe.setAttribute('aria-pressed','false');
   creatorRow.append(creator,frequency,subscribe);
   const authorLink = document.createElement('a'); authorLink.className = 'author-link'; authorLink.target = '_blank'; authorLink.rel = 'noopener noreferrer';
@@ -108,7 +108,7 @@
   preference.value = defaultKind(GM_getValue('library_default_kind', 'author')); field('默认下载内容', preference);
   const save = document.createElement('button'); save.type = 'submit'; save.textContent = '保存设置'; form.append(save); settings.append(summary, form);
   const footer = document.createElement('div'); footer.className = 'footer';
-  const version = document.createElement('small'); version.textContent = 'SENDER 1.5';
+  const version = document.createElement('small'); version.textContent = 'SENDER 1.6';
   const libraryLink = document.createElement('a'); libraryLink.textContent = '查看任务 ↗'; libraryLink.target = '_blank'; libraryLink.rel = 'noopener noreferrer'; libraryLink.hidden = true;
   const status = document.createElement('p'); status.className = 'status'; status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
   const downloads = document.createElement('div'); downloads.className = 'downloads'; downloads.append(creatorRow, authorLink, actions, hint);

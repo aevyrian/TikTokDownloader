@@ -7,7 +7,7 @@ const require = createRequire(import.meta.url);
 const view = require('../app/static/task-view.js');
 const webSource = readFileSync(new URL('../app/static/app.js', import.meta.url), 'utf8');
 const html = readFileSync(new URL('../app/static/index.html', import.meta.url), 'utf8');
-const { taskTitle } = require('../app/static/app.js');
+const { taskTitle, switchView } = require('../app/static/app.js');
 const tasks = [
   { id: 'running', kind: 'author', status: 'downloading', total: 20, completed: 6, preview: [{ nickname: '山野慢镜头' }] },
   { id: 'failed', kind: 'author', status: 'failed', total: 10, completed: 2, preview: [{ nickname: '城市漫游' }] },
@@ -29,15 +29,16 @@ class Element {
   addEventListener(name, callback) { this.events[name] = callback; }
   get lastElementChild() { return this.children.at(-1); }
   querySelector(selector) { return this.children.find(n => selector.startsWith('.') ? n.className.split(' ').includes(selector.slice(1)) : n.tagName === selector) || this.children.map(n => n.querySelector?.(selector)).find(Boolean); }
-  click() { this.events.click?.({ target: this }); }
+  click() { return this.events.click?.({ target: this }); }
   showModal() { this.open = true; }
   close() { this.open = false; }
 }
 
-function fixture({ saved = null, readError = false, writeError = false } = {}) {
+function fixture({ saved = null, readError = false, writeError = false, onBatch } = {}) {
   const ids = Object.fromEntries(['task-list', 'task-detail', 'task-detail-dialog', 'task-dialog-body', 'task-query', 'task-filters', 'task-summary', 'task-layout-note', 'task-dialog-close', 'task-result-count', 'task-table-heading', 'open-submit'].map(id => [id, new Element()]));
   const choices = ['a', 'b'].map(value => { const button = new Element('button'); button.dataset.taskLayoutChoice = value; return button; });
   const writes = [];
+  ids['task-bulk-actions']=new Element();
   globalThis.document = { getElementById: id => ids[id], createElement: tag => new Element(tag) };
   globalThis.localStorage = { getItem() { if (readError) throw Error('Storage unavailable'); return saved; }, setItem(key, value) { if (writeError) throw Error('Storage unavailable'); saved = value; writes.push([key, value]); } };
   globalThis.matchMedia = () => ({ matches: false });
@@ -45,11 +46,15 @@ function fixture({ saved = null, readError = false, writeError = false } = {}) {
   globalThis.fetch = () => { requests++; throw Error('A layout change must not call the network'); };
   const application = new Element();
   const makeTaskCard = task => { const card = new Element('article'); card.task = task; const actions = new Element('div'); actions.className = 'record-actions'; card.append(actions); return card; };
-  const controller = view.create({ root: { querySelectorAll: () => choices }, application, makeTaskCard, title: taskTitle, statusNames: {}, formatDate: () => '刚刚' });
+  const controller = view.create({ root: { querySelectorAll: () => choices }, application, makeTaskCard, title: taskTitle, statusNames: {}, formatDate: () => '刚刚', onBatch });
   return { ids, choices, application, controller, writes, requests: () => requests };
 }
 
 try {
+  const operations=[];const bulk=fixture({onBatch:async(action,ids)=>operations.push({action,ids})});bulk.controller.update(tasks);
+  bulk.ids['task-filters'].children.find(b=>b.dataset.filter==='attention').click();
+  await bulk.ids['task-bulk-actions'].children[0].click();assert.deepEqual(operations.at(-1),{action:'retry',ids:['failed']});
+  await bulk.ids['task-bulk-actions'].children[2].click();assert.deepEqual(operations.at(-1),{action:'delete',ids:['failed','confirm']});
   const normal = fixture();
   assert.equal(normal.application.dataset.taskLayout, 'a');
   normal.controller.update(tasks);
@@ -76,22 +81,68 @@ try {
   delete globalThis.document; delete globalThis.localStorage; delete globalThis.matchMedia; delete globalThis.fetch;
 }
 
+// A rejected request must dismiss private dialogs before the login screen returns.
+try {
+  for (const status of [401, 403]) {
+    const session = fixture({ saved: 'b' });
+    session.controller.update(tasks);
+    session.ids['task-list'].children[0].querySelector('.record-actions').children.at(-1).click();
+    assert.equal(session.ids['task-detail-dialog'].open, true);
+    const inputs = ['access-key', 'script-token', 'cookie', 'confirm-key', 'legacy-key', 'new-admin-key', 'repeat-admin-key'];
+    for (const id of [...inputs, 'connection', 'feed', 'admin-key-form', 'submit-dialog', 'access-eyebrow', 'access-title', 'access-description', 'access-key-label', 'confirm-key-field', 'legacy-key-field', 'access-hint', 'connect-button']) session.ids[id] = new Element();
+    session.ids.application = session.application;
+    session.ids.connection.hidden = true;
+    session.ids['submit-dialog'].showModal();
+    for (const id of inputs) session.ids[id].value = 'synthetic-private-input';
+    session.ids['admin-key-form'].reset = () => { for (const id of ['new-admin-key', 'repeat-admin-key']) session.ids[id].value = ''; };
+    const state = { token: 'synthetic-session', generation: 0, navigation: 0, auth: { setup_required: false } };
+    const stored = new Map([['library_access_key', state.token]]);
+    const context = vm.createContext({
+      $: id => session.ids[id], state, switchView, taskView: session.controller, AbortSignal,
+      document: { querySelectorAll: selector => selector === 'dialog[open]' ? [session.ids['task-detail-dialog'], session.ids['submit-dialog']].filter(dialog => dialog.open) : [] },
+      localStorage: { removeItem: key => stored.delete(key) },
+      fetch: async () => ({ ok: false, status, json: async () => ({ detail: '请重新登录' }) })
+    });
+    vm.runInContext(webSource.slice(webSource.indexOf('  async function api('), webSource.indexOf('  async function initializeConnection(')), context);
+    await assert.rejects(vm.runInContext("api('/api/tasks')", context), /请重新登录/);
+    for (const id of ['task-detail-dialog', 'submit-dialog']) assert.equal(session.ids[id].open, false, `${status} 后必须关闭 ${id}`);
+    for (const id of inputs) assert.equal(session.ids[id].value, '', `${status} 后必须清空 ${id}`);
+    assert.equal(state.token, '');
+    assert.equal(stored.has('library_access_key'), false);
+    assert.equal(session.ids.application.hidden, true);
+    assert.equal(session.ids.connection.hidden, false);
+    assert.notEqual(session.ids['connect-button'].disabled, true);
+    assert.equal(session.ids['task-detail'].children.length, 0);
+    assert.equal(session.ids['task-dialog-body'].children.length, 0);
+    session.controller.update(tasks);
+    assert.equal(session.ids['task-list'].children.length, tasks.length, '重新登录后相同任务仍须正常渲染');
+  }
+} finally {
+  delete globalThis.document; delete globalThis.localStorage; delete globalThis.matchMedia; delete globalThis.fetch;
+}
+
 // Exercise the existing action callbacks rather than duplicating their routing rules.
 const calls = [];
 const cardContext = vm.createContext({
   element: (tag, className, text) => { const node = new Element(tag, text); node.className = className; return node; },
   taskTitle, statusNames: {}, formatDate: () => '刚刚',
   action: (label, callback) => { const node = new Element('button', label); node.invoke = callback; return node; },
-  api: async (url, method) => { calls.push({ url, method }); }, loadTasks: async () => {}
+  api: async (url, method) => { calls.push({ url, method }); }, loadTasks: async () => {}, notice:()=>{}
 });
 const cardFunction = webSource.slice(webSource.indexOf('  function taskCard(task)'), webSource.indexOf('  const taskView ='));
 assert.ok(cardFunction.startsWith('  function taskCard(task)'));
 vm.runInContext(`${cardFunction}\nglobalThis.makeCard = taskCard;`, cardContext);
-for (const [status, label, suffix] of [['failed', '重试', 'retry'], ['queued', '取消任务', 'cancel'], ['awaiting_confirmation', '接受此任务原项目优选', 'confirm'], ['awaiting_confirmation', '取消此任务', 'cancel']]) {
+for (const [status, label, suffix] of [['failed', '重试', 'retry'], ['queued', '取消', 'cancel'], ['awaiting_confirmation', '接受此任务原项目优选', 'confirm'], ['awaiting_confirmation', '取消', 'cancel']]) {
   const card = cardContext.makeCard({ id: 'task/a', status, kind: 'detail', link: 'https://www.douyin.com/video/123', preview: [] });
   await card.querySelector('.record-actions').children.find(node => node.textContent === label).invoke();
   assert.deepEqual(calls.at(-1), { url: `/api/tasks/task%2Fa/${suffix}`, method: 'POST' });
 }
+const deleting=cardContext.makeCard({id:'remove/a',status:'downloading',kind:'detail',link:'https://www.douyin.com/video/123',preview:[]});
+await deleting.querySelector('.record-actions').children.find(n=>n.textContent==='删除').invoke();
+assert.deepEqual(calls.at(-1),{url:'/api/tasks/remove%2Fa',method:'DELETE'});
+assert.equal(view.bulkEligible({status:'failed'},'retry'),true);
+assert.equal(view.bulkEligible({status:'completed'},'retry'),false);
+assert.equal(view.bulkEligible({status:'downloading'},'cancel'),true);
 const taskScript = html.indexOf('src="/static/task-view.js?'), appScript = html.indexOf('src="app.js?');
 assert.ok(taskScript >= 0 && appScript > taskScript, '任务模块必须走静态目录并先于app初始化');
 console.log('Task view checks passed: fixed A, legacy B preference, dialog selection, polling, and shared API actions.');

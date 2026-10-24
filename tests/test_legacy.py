@@ -1,8 +1,10 @@
 import json
+import os
 import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -171,6 +173,75 @@ class LegacyDedupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.library(q=WORK_ID)['total'],1)
         index.scan(); self.assertEqual(self.store.work(WORK_ID)['id'],local_id)
         self.assertEqual(before,(p.stat().st_size,p.stat().st_mtime_ns))
+
+    async def test_two_work_ids_cannot_claim_the_same_old_video(self):
+        self.original(); LegacyIndex(self.store,self.media).scan()
+        first=await self.run_job()
+        self.assertEqual(first['status'],'completed')
+        local_id=self.store.work(WORK_ID)['id']
+        self.store.link_work(WORK_ID,local_id)
+        self.item['id']='7431234567890123457'
+        second=self.store.create_task(self.item['id'],'detail',accept_quality=True)
+        await self.service.process_one()
+        self.assertEqual(self.store.task(second['id'])['status'],'failed')
+        self.assertIsNone(self.store.work(self.item['id']))
+        self.assertEqual(self.store.work(WORK_ID)['id'],local_id)
+        self.assertEqual(self.core.download_calls,0)
+
+    async def test_existing_conflicting_aliases_fail_without_rewriting_old_rows(self):
+        original=self.original(); LegacyIndex(self.store,self.media).scan()
+        local_id=self.store.library()['items'][0]['id']
+        aliases=[(WORK_ID,local_id),('7431234567890123457',local_id)]
+        with self.store.connect() as db:
+            db.executemany('INSERT INTO work_aliases VALUES (?,?)',aliases)
+        for work_id,_ in aliases:
+            with self.subTest(work_id=work_id):
+                self.item['id']=work_id
+                task=self.store.create_task(work_id,'detail',accept_quality=True)
+                await self.service.process_one()
+                self.assertEqual(self.store.task(task['id'])['status'],'failed')
+                self.assertIn('无法可靠区分',self.store.task(task['id'])['message'])
+        with self.store.connect() as db:
+            self.assertEqual([tuple(row) for row in db.execute('SELECT id,work_id FROM work_aliases ORDER BY id')],aliases)
+        self.assertEqual(self.store.work(local_id)['id'],local_id)
+        self.assertEqual(original.read_bytes(),b'original')
+        self.assertEqual(self.core.download_calls,0)
+
+    async def test_existing_alias_to_invalid_date_fails_without_rewriting_old_rows(self):
+        original=self.author/'2025-02-30 12.30.00-视频-旧名字-旧描述.mp4'
+        original.write_bytes(b'original')
+        before=(original.read_bytes(),original.stat().st_mtime_ns)
+        LegacyIndex(self.store,self.media).scan()
+        local_id=self.store.library()['items'][0]['id']
+        with self.store.connect() as db:
+            db.execute('INSERT INTO work_aliases VALUES (?,?)',(WORK_ID,local_id))
+        job=await self.run_job()
+        self.assertEqual(job['status'],'failed')
+        self.assertIn('无法识别时间',job['message'])
+        with self.store.connect() as db:
+            self.assertEqual([tuple(row) for row in db.execute('SELECT id,work_id FROM work_aliases')],[(WORK_ID,local_id)])
+        self.assertEqual(self.store.work(local_id)['id'],local_id)
+        self.assertEqual(before,(original.read_bytes(),original.stat().st_mtime_ns))
+        self.assertEqual(self.core.download_calls,0)
+
+    async def test_invalid_calendar_date_in_existing_index_blocks_download_and_alias(self):
+        original=self.author/'2025-02-30 12.30.00-视频-旧名字-旧描述.mp4'
+        original.write_bytes(b'original')
+        modified=datetime(2025,12,1,12,30).timestamp()
+        os.utime(original,(modified,modified))
+        before=(original.read_bytes(),original.stat().st_mtime_ns)
+        LegacyIndex(self.store,self.media).scan()
+        self.service.store=Store(self.root/'data')
+        self.assertEqual(self.store.library()['items'][0]['created_at'],'2025-12-01T12:30:00')
+        for created in ('2025-12-01 12:30:00','2025-12-02 12:30:00'):
+            with self.subTest(created=created):
+                self.item['create_time']=created
+                job=await self.run_job()
+                self.assertEqual(job['status'],'failed')
+                self.assertIn('无法识别时间',job['message'])
+                self.assertIsNone(self.store.work(WORK_ID))
+        self.assertEqual(self.core.download_calls,0)
+        self.assertEqual(before,(original.read_bytes(),original.stat().st_mtime_ns))
 
     async def test_incomplete_old_gallery_stops_without_redownloading(self):
         self.item.update(type='图集',downloads=['one','two'])
