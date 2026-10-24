@@ -1,0 +1,17 @@
+.git
+.venv
+.comet
+.agents
+.codex
+dist
+data
+media
+**/Volume
+**/__pycache__
+**/*.pyc
+**/*.pyd
+**/*.exe
+**/*.dll
+**/.env*
+docs
+tests
