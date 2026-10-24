@@ -24,7 +24,7 @@
   if (typeof module !== 'undefined' && module.exports) { module.exports = { mediaURL, switchView, moveGallery, isVideoFile, authorInitial, keyError, taskTitle, playVisible, applySound, releasePlayback, preloadVideos }; return; }
   const $ = id => document.getElementById(id);
   if (location.protocol === 'file:') { $('connect-form').hidden = true; $('local-preview').hidden = false; return; }
-  const state = { token: localStorage.getItem('library_access_key') || '', muted:false, favoriteKind:'works', auth: null, view: 'library', items: [], total: 0, generation: 0, navigation: 0, busy: false };
+  const state = { token: localStorage.getItem('library_access_key') || '', muted:true, favoriteKind:'works', auth: null, view: 'library', items: [], total: 0, generation: 0, navigation: 0, busy: false };
   const frequencies={once:'不订阅',three_days:'每3天更新',weekly:'每7天更新',monthly:'每月更新',quarterly:'每季度更新',yearly:'每年更新'};
   const frequencyValues={1440:'three_days',4320:'three_days',10080:'weekly',43200:'monthly',129600:'quarterly',525600:'yearly'};
   const statusNames = { queued: '已排队', paused:'已暂停', parsing: '正在解析', awaiting_confirmation: '等待画质确认', downloading: '正在下载', completed: '完整保存', failed: '失败', interrupted: '已中断', cancelled: '已取消' };
