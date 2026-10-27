@@ -23,14 +23,15 @@
     const list = byId('task-list'), detail = byId('task-detail'), dialog = byId('task-detail-dialog'), dialogBody = byId('task-dialog-body');
     const query = byId('task-query'), filters = byId('task-filters'), summary = byId('task-summary');
     const filterButtons = new Map(), summaryButtons = new Map();
-    let tasks = [], filter = 'all', selected = null, lastData = null;
+    let tasks = [], filter = 'all', selected = null, lastData = null, batching = false;
     const bulkButtons = new Map();
     if (byId('task-bulk-actions')) for (const [value,label] of [['retry','全部重试'],['cancel','全部取消'],['delete','全部删除']]) {
       const button=node('button','secondary',label);button.type='button';
       button.title='仅处理当前筛选和搜索结果；删除只移除任务记录，保留媒体文件';
       button.addEventListener('click',async()=>{
+        if (batching) return;
         const ids=filterTasks(tasks,filter,query.value,title).filter(task=>bulkEligible(task,value)).map(task=>task.id);
-        button.disabled=true;try{await onBatch(value,ids);}finally{render();}
+        batching=true;render();try{await onBatch(value,ids);}finally{batching=false;render();}
       });byId('task-bulk-actions').append(button);bulkButtons.set(value,button);
     }
     application.dataset.taskLayout = 'a';
@@ -63,7 +64,7 @@
     }
     function render() {
       const counts = taskCounts(tasks), visible = filterTasks(tasks, filter, query.value, title);
-      for(const [value,button] of bulkButtons)button.disabled=!visible.some(task=>bulkEligible(task,value));
+      for(const [value,button] of bulkButtons)button.disabled=batching||!visible.some(task=>bulkEligible(task,value));
       for (const [value, button] of filterButtons) { button.setAttribute('aria-pressed', String(filter === value)); button.lastElementChild.textContent = counts[value]; }
       for (const [value, button] of summaryButtons) button.querySelector('strong').textContent = String(counts[value]).padStart(2, '0');
       byId('task-result-count').textContent = `${visible.length} 个任务`;

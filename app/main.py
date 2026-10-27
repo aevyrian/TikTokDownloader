@@ -18,11 +18,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .core import Core, download_directory, normalize_input
 from .store import Store, FREQUENCIES, BEIJING
-from .legacy import LegacyIndex, recorded_download
+from .legacy import LegacyIndex, recorded_download, recorded_downloads
 from .playback import PlaybackCache
 
 
-VERSION = "1.3.2"
+VERSION = "1.3.3"
 BASE = Path(__file__).resolve().parent
 
 
@@ -95,7 +95,7 @@ class JobService:
             and (root / file).is_file() and (root / file).stat().st_size > 0
             for file in work["files"]))
 
-    def saved(self, item):
+    def saved(self, item, legacy_cache=None):
         work_id=str(item['id']); work=self.store.work(work_id)
         if self.complete(work):
             if item.get('type') in {'图集','实况'} and len(work['files'])!=len(item.get('downloads',[])):
@@ -122,11 +122,26 @@ class JobService:
                 raise RuntimeError('旧作品文件缺失或数量不一致，已保留原文件并停止，请核对后重试')
             self.store.link_work(work_id,old['id'])
             return True
-        if recorded_download(self.legacy_root,work_id):
+        if legacy_cache is None:
+            recorded = recorded_download(self.legacy_root, work_id)
+            unidentified = self.store.legacy_unidentified(uid) if not recorded else False
+        else:
+            if 'recorded' not in legacy_cache:
+                legacy_cache['recorded'] = recorded_downloads(self.legacy_root, legacy_cache['ids'])
+            recorded = work_id in legacy_cache['recorded']
+            unknown = legacy_cache.setdefault('unidentified', {})
+            if not recorded and uid not in unknown:
+                unknown[uid] = self.store.legacy_unidentified(uid)
+            unidentified = unknown.get(uid, False)
+        if recorded:
             raise RuntimeError('旧下载记录已有此作品，但无法可靠定位文件，已停止以免重复下载')
-        if self.store.legacy_unidentified(uid):
+        if unidentified:
             raise RuntimeError('此博主存在无法识别时间的旧文件，已停止以免重复下载，请先核对旧文件')
         return False
+
+    def finish(self, task, is_update, **values):
+        pause = (120 if is_update else 300) + secrets.randbelow(181) if task['kind'] == 'author' else 0
+        self.store.update_task(task['id'], pause_seconds=pause, **values)
 
     async def process_one(self):
         task = self.store.claim_task()
@@ -148,6 +163,7 @@ class JobService:
             current = self.store.task(task['id'])
             if not current or current['status'] == 'cancelled':
                 return True
+            is_update = task['kind'] == 'author' and self.store.author_downloaded(task['link'])
             try:
                 if not self.core.ready:
                     await self.initialize()
@@ -157,10 +173,13 @@ class JobService:
                 items = await self.core.parse(task["link"], task["kind"])
                 self.store.update_task(task["id"], preview=items)
                 pending, failures = [], []
+                legacy_cache = {'ids': [str(item['id']) for item in items]}
                 for item in items:
                     try:
-                        if not self.saved(item):
+                        if not self.saved(item, legacy_cache):
                             pending.append(item)
+                        else:
+                            is_update = True
                     except RuntimeError as exc:
                         failures.append(f"{item['id']}：{safe_error(exc, self.store)}")
                 self.store.update_task(task["id"], total=len(pending) + len(failures))
@@ -186,7 +205,7 @@ class JobService:
                 summary = f"已完整保存 {completed} 个作品，跳过本库已有 {len(items) - completed - len(failures)} 个"
                 if failures:
                     summary += f"；{len(failures)} 个未完成，可重试：" + '；'.join(failures[:3])
-                self.store.update_task(task["id"], status="failed" if failures else "completed", completed=completed, message=summary[:1500])
+                self.finish(task, is_update, status="failed" if failures else "completed", completed=completed, message=summary[:1500])
                 if task["author_id"] and self.store.author(task["author_id"]):
                     name = items[0].get("nickname", "") if items else ""
                     values = {"last_checked": time.time(), "last_error": summary[:500] if failures else ""}
@@ -195,24 +214,25 @@ class JobService:
                     self.store.patch_author(task["author_id"], **values)
             except asyncio.CancelledError:
                 current = self.store.task(task['id'])
-                if current and current['status'] != 'cancelled':
-                    self.store.update_task(task["id"], status="interrupted", message="服务停止，任务已保留，可重试")
+                if current:
+                    self.finish(task, is_update, status='cancelled' if current['status'] == 'cancelled' else 'interrupted',
+                                message=current['message'] if current['status'] == 'cancelled' else '服务停止，任务已保留，可重试')
                 raise
             except Exception as exc:
                 message = safe_error(exc, self.store)
-                self.store.update_task(task["id"], status="failed", message=message)
+                self.finish(task, is_update, status="failed", message=message)
                 if task["author_id"] and self.store.author(task["author_id"]):
                     self.store.patch_author(task["author_id"], last_checked=time.time(), last_error=message)
         return True
 
     def schedule(self):
         now = time.time()
-        if not 8 <= datetime.fromtimestamp(now, BEIJING).hour < 18 or now < self.store.setting('scheduler_next_release', 0):
+        if (not 8 <= datetime.fromtimestamp(now, BEIJING).hour < 18
+                or now < self.store.setting('queue_resume_at', 0) or self.store.author_queue_busy()):
             return
         for author in sorted(self.store.due_authors(), key=lambda a: a['next_check'])[:1]:
             self.store.create_task(author["url"], "author", author_id=author["id"])
             self.store.mark_author_scheduled(author["id"])
-            self.store.set_setting('scheduler_next_release', now + 600 + secrets.randbelow(1201))
 
     async def run(self):
         self.running = True
@@ -233,7 +253,8 @@ class JobService:
                     needs_recovery = False
                 processed = await self.process_one()
                 self.queue_error = ""
-                await asyncio.sleep(0 if processed else 0.5)
+                remaining = self.store.setting('queue_resume_at', 0) - time.time()
+                await asyncio.sleep(min(30, max(0.5, remaining)) if not processed else 0)
             except (sqlite3.Error, OSError) as exc:
                 self.queue_error = f"数据读写暂时失败（{type(exc).__name__}），请检查磁盘空间和数据库占用；队列将重试"
                 needs_recovery = True
@@ -440,7 +461,13 @@ def make_app(data_dir=None, media_dir=None, token=None, core=None, legacy_dir=No
 
     @app.get("/api/tasks", dependencies=[Depends(authorize)])
     async def tasks():
-        return [public_task(task) for task in store.tasks()]
+        result = [public_task(task) for task in store.tasks()]
+        resume_at = store.setting('queue_resume_at', 0)
+        if resume_at > time.time():
+            for task in result:
+                if task['status'] == 'queued':
+                    task.update(queue_resume_at=resume_at, message=f"队列休息中，预计 {datetime.fromtimestamp(resume_at, BEIJING):%H:%M:%S} 按顺序继续")
+        return result
 
     @app.post("/api/tasks", dependencies=[Depends(authorize)])
     async def add_task(body: TaskInput):

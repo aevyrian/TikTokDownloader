@@ -1,5 +1,6 @@
 import json
 import os
+import sqlite3
 import tempfile
 import threading
 import time
@@ -12,10 +13,76 @@ from fastapi.testclient import TestClient
 
 from app.legacy import LegacyIndex
 from app.legacy import directory_works
+from app import legacy
 from app.main import make_app
 from app.main import JobService
 from app.store import Store
 from tests.test_backend import FakeCore, WORK_ID
+
+
+class RecordedDownloadTests(unittest.TestCase):
+    def test_batch_reads_only_requested_ids_with_one_read_only_connection(self):
+        self.assertTrue(callable(getattr(legacy, 'recorded_downloads', None)), 'batch lookup is missing')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'DouK-Downloader.db'
+            ids = [str(7431234567890123000 + i) for i in range(1001)]
+            saved = {ids[0], ids[-1], '7431234567890999999'}
+            with sqlite3.connect(path) as db:
+                db.execute('CREATE TABLE download_data(ID TEXT PRIMARY KEY)')
+                db.executemany('INSERT INTO download_data VALUES (?)', [(work_id,) for work_id in saved])
+            db.close()
+            before = (path.read_bytes(), path.stat().st_mtime_ns)
+            connect, queries = sqlite3.connect, []
+            def read_only_connect(*args, **kwargs):
+                connection = connect(*args, **kwargs)
+                connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 999)
+                connection.set_trace_callback(queries.append)
+                with self.assertRaisesRegex(sqlite3.OperationalError, 'readonly'):
+                    connection.execute('INSERT INTO download_data VALUES (?)', ('write-must-fail',))
+                return connection
+            with patch('app.legacy.sqlite3.connect', side_effect=read_only_connect) as opened:
+                self.assertEqual(legacy.recorded_downloads(root, ids + [ids[0], "' OR 1=1 --"]), {ids[0], ids[-1]})
+                self.assertEqual(opened.call_count, 1)
+            self.assertEqual(sum(query.startswith('SELECT ') for query in queries), 2)
+            self.assertEqual(before, (path.read_bytes(), path.stat().st_mtime_ns))
+            self.assertTrue(legacy.recorded_download(root, ids[0]))
+            self.assertFalse(legacy.recorded_download(root, ids[1]))
+
+    def test_empty_ids_and_missing_database_do_not_open_or_create_database(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch('app.legacy.sqlite3.connect') as opened:
+                self.assertEqual(legacy.recorded_downloads(root, []), set())
+                self.assertEqual(legacy.recorded_downloads(root, [WORK_ID]), set())
+                opened.assert_not_called()
+            self.assertFalse((root / 'DouK-Downloader.db').exists())
+
+    def test_invalid_database_stops_instead_of_claiming_no_saved_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'DouK-Downloader.db'
+            path.write_bytes(b'not a database')
+            with self.assertRaisesRegex(RuntimeError, '旧下载记录暂时无法读取'):
+                legacy.recorded_downloads(root, [WORK_ID])
+            self.assertEqual(path.read_bytes(), b'not a database')
+
+    def test_database_resolving_outside_root_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'original'
+            root.mkdir()
+            outside = Path(tmp) / 'outside.db'
+            outside.write_bytes(b'outside')
+            path = root / 'DouK-Downloader.db'
+            path.write_bytes(b'link-target-placeholder')
+            resolve = Path.resolve
+            def redirected(candidate, *args, **kwargs):
+                return outside if candidate == path else resolve(candidate, *args, **kwargs)
+            with patch.object(Path, 'resolve', redirected), patch('app.legacy.sqlite3.connect') as opened:
+                with self.assertRaisesRegex(RuntimeError, '旧下载记录路径异常'):
+                    legacy.recorded_downloads(root, [WORK_ID])
+                opened.assert_not_called()
+            self.assertEqual(outside.read_bytes(), b'outside')
 
 
 class LegacyTests(unittest.TestCase):

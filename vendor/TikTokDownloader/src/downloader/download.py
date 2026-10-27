@@ -405,7 +405,9 @@ class Downloader:
         return path.exists()
 
     async def is_skip(self, id_: str, path: Path) -> bool:
-        return await self.is_downloaded(id_) or self.is_exists(path)
+        return await self.is_downloaded(id_) or path.is_symlink() or (
+            self.is_exists(path) and (not path.is_file() or path.stat().st_size > 0)
+        )
 
     async def download_image(
         self,

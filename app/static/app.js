@@ -348,7 +348,7 @@
       const frequency = element('select'); frequency.setAttribute('aria-label', `${author.name || '此博主'}的后续更新`);
       for (const [value, label] of Object.entries(names)) if (value !== 'legacy' || current === 'legacy') frequency.append(new Option(label, value));
       frequency.value = current;
-      actions.append(frequency, action('保存方式', async () => { if (frequency.value === 'legacy') return; if(author.registered)await api(`/api/authors/${encodeURIComponent(author.id)}`, 'PATCH', {frequency:frequency.value});else await api('/api/authors','POST',{url:author.url,name:author.name,frequency:frequency.value}); await loadAuthors(); notice('后续更新方式已保存。'); }), action('现在补齐作品', async () => { if(author.registered)await api(`/api/authors/${encodeURIComponent(author.id)}/check`, 'POST');else await api('/api/tasks','POST',{link:author.url,kind:'author'}); await navigate('tasks'); notice('博主下载已提交，已有作品自动跳过。'); }));
+      actions.append(frequency, action('保存方式', async () => { if (frequency.value === 'legacy') return; if(author.registered)await api(`/api/authors/${encodeURIComponent(author.id)}`, 'PATCH', {frequency:frequency.value});else await api('/api/authors','POST',{url:author.url,name:author.name,frequency:frequency.value}); await loadAuthors(favoritesOnly); notice('后续更新方式已保存。'); }), action('现在补齐作品', async () => { if(author.registered)await api(`/api/authors/${encodeURIComponent(author.id)}/check`, 'POST');else await api('/api/tasks','POST',{link:author.url,kind:'author'}); await navigate('tasks'); notice('博主下载已提交，已有作品自动跳过。'); }));
       card.append(content, actions); container.append(card);
     }
     if(!visible.length)empty(container,favoritesOnly?'还没有收藏博主':'还没有历史博主','在订阅页点“收藏博主”，或添加博主页。收藏不会自动开启下载。');

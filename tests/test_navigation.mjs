@@ -7,7 +7,7 @@ const { switchView, applySound } = createRequire(import.meta.url)('../app/static
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const stateContext = vm.createContext({ localStorage: { getItem: key => key === 'library_muted' ? 'false' : '' } });
 vm.runInContext(source.slice(source.indexOf('  const state ='), source.indexOf('  const statusNames =')) + '\nglobalThis.state = state;', stateContext);
-assert.equal(stateContext.state.muted, true, '刷新作品库默认静音，即使旧浏览器偏好为开声');
+assert.equal(stateContext.state.muted, true, '刷新作品库默认静音，不沿用旧的开声音偏好');
 const html = readFileSync(new URL('../app/static/index.html', import.meta.url), 'utf8');
 assert.match(html, /id="sound-toggle"[^>]*aria-pressed="false">声音：关<\/button>/, '初始声音按钮应显示静音');
 const button = { events: {}, setAttribute() {}, addEventListener(type, callback) { this.events[type] = callback; } };
@@ -40,6 +40,39 @@ const first = tasksContext.loadTasks();
 tasksContext.state.navigation++; tasksContext.state.view = 'settings';
 resolveTasks([]); await first;
 assert.equal(rendered, 0, '离开下载后不得渲染迟到的任务响应');
+
+class AuthorNode {
+  constructor(tag, className = '', text = '') { this.tagName = tag; this.className = className; this.textContent = text; this.children = []; this.classList = { toggle() {} }; }
+  append(...nodes) { this.children.push(...nodes); }
+  replaceChildren(...nodes) { this.children = [...nodes]; }
+  setAttribute() {}
+}
+const authorList = new AuthorNode('div');
+const authorState = { navigation: 1, view: 'favorites' };
+let interval = 4320;
+const authorContext = vm.createContext({
+  state: authorState, $: id => ['favorite-author-list', 'author-list'].includes(id) ? authorList : { value: '' },
+  element: (tag, className, text) => new AuthorNode(tag, className, text),
+  action: (label, invoke) => Object.assign(new AuthorNode('button', '', label), { invoke }),
+  Option: function (label, value) { return { label, value }; },
+  frequencies: { once: '不订阅', three_days: '每3天更新', weekly: '每7天更新' },
+  frequencyValues: { 4320: 'three_days', 10080: 'weekly' }, formatDate: () => '', notice() {}, empty() {},
+  api: async (path, method, body) => {
+    if (method === 'PATCH') interval = body.frequency === 'weekly' ? 10080 : 4320;
+    return path === '/api/authors/history' ? [{ id: 'author', name: '博主', url: 'https://example.test', enabled: true, registered: true, favorite: true, interval_minutes: interval }] : {};
+  }
+});
+vm.runInContext(source.slice(source.indexOf('  async function loadAuthors('), source.indexOf('  async function loadSettings(')) + '\nglobalThis.loadAuthors = loadAuthors;', authorContext);
+await authorContext.loadAuthors(true);
+const authorCard = authorList.children[1], authorActions = authorCard.children[1];
+authorActions.children.find(node => node.tagName === 'select').value = 'weekly';
+await authorActions.children.find(node => node.textContent === '保存方式').invoke();
+assert.equal(authorList.children[1].children[0].children[0].children[1].textContent, '每7天更新', '收藏博主保存频率后应立即刷新卡片');
+authorState.view = 'authors'; interval = 4320;
+await authorContext.loadAuthors();
+authorList.children[1].children[1].children.find(node => node.tagName === 'select').value = 'weekly';
+await authorList.children[1].children[1].children.find(node => node.textContent === '保存方式').invoke();
+assert.equal(authorList.children[1].children[0].children[0].children[1].textContent, '每7天更新', '订阅页保存频率后应立即刷新卡片');
 
 const panels = ['library', 'tasks', 'authors', 'settings'].map(view => ({ id: `view-${view}`, hidden: true }));
 const nodes = Object.fromEntries(['application', 'page-title', 'page-eyebrow'].map(id => [id, { dataset: {} }]));

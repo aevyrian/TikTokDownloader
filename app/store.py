@@ -164,7 +164,7 @@ class Store:
                 ) ORDER BY created_at DESC,rowid DESC
             """)]
 
-    def update_task(self, task_id, **values):
+    def update_task(self, task_id, pause_seconds=0, **values):
         allowed = {"status", "message", "completed", "total", "accept_quality", "preview"}
         if not values or not set(values) <= allowed:
             raise ValueError("任务更新字段无效")
@@ -174,10 +174,24 @@ class Store:
         with self.connect() as db:
             db.execute("UPDATE tasks SET " + ",".join(f"{key}=?" for key in values) + " WHERE id=?",
                        (*values.values(), task_id))
+            if pause_seconds:
+                db.execute("INSERT INTO settings VALUES ('queue_resume_at',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                           (json.dumps(time.time() + pause_seconds),))
+
+    def author_downloaded(self, link):
+        with self.connect() as db:
+            return db.execute("SELECT 1 FROM tasks WHERE link=? AND kind='author' AND status='completed' LIMIT 1", (link,)).fetchone() is not None
+
+    def author_queue_busy(self):
+        with self.connect() as db:
+            return db.execute("SELECT 1 FROM tasks WHERE kind='author' AND status IN ('queued','parsing','downloading') LIMIT 1").fetchone() is not None
 
     def claim_task(self):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            pause = db.execute("SELECT value FROM settings WHERE key='queue_resume_at'").fetchone()
+            if pause and time.time() < json.loads(pause[0]):
+                return None
             row = db.execute("SELECT * FROM tasks WHERE status='queued' ORDER BY created_at,rowid LIMIT 1").fetchone()
             if not row:
                 return None

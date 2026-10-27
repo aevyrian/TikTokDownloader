@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cloudrift Sender
 // @namespace    douyin-local-library
-// @version      1.6.0
+// @version      1.6.1
 // @description  一键下载作品或博主，按日、周、月订阅更新并同步网站收藏状态。
 // @match        https://www.douyin.com/*
 // @match        https://douyin.com/*
@@ -80,7 +80,7 @@
   const panel = document.createElement('section'); panel.hidden = true; panel.setAttribute('aria-label', 'Cloudrift 下载面板');
   const toggle = document.createElement('button'); toggle.textContent = '▷'; toggle.className = 'toggle'; toggle.title = 'Cloudrift · 下载到媒体库';
   toggle.setAttribute('aria-label', '打开媒体库发送菜单'); toggle.setAttribute('aria-expanded', 'false');
-  toggle.addEventListener('click', () => { settings.open = false; togglePanel(panel, toggle); subscriptionFor='';detect(); });
+  toggle.addEventListener('click', () => { settings.open = false; togglePanel(panel, toggle); if(!panel.hidden){authors=null;subscriptionGeneration++;subscriptionFor='';}detect(); });
   const header = document.createElement('header');
   const title = document.createElement('strong'); title.textContent = 'Cloudrift';
   const close = document.createElement('button'); close.textContent = '×'; close.className = 'close'; close.setAttribute('aria-label', '收起下载面板');
@@ -108,14 +108,14 @@
   preference.value = defaultKind(GM_getValue('library_default_kind', 'author')); field('默认下载内容', preference);
   const save = document.createElement('button'); save.type = 'submit'; save.textContent = '保存设置'; form.append(save); settings.append(summary, form);
   const footer = document.createElement('div'); footer.className = 'footer';
-  const version = document.createElement('small'); version.textContent = 'SENDER 1.6';
+  const version = document.createElement('small'); version.textContent = 'SENDER 1.6.1';
   const libraryLink = document.createElement('a'); libraryLink.textContent = '查看任务 ↗'; libraryLink.target = '_blank'; libraryLink.rel = 'noopener noreferrer'; libraryLink.hidden = true;
   const status = document.createElement('p'); status.className = 'status'; status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
   const downloads = document.createElement('div'); downloads.className = 'downloads'; downloads.append(creatorRow, authorLink, actions, hint);
   footer.append(version, libraryLink); panel.append(header, downloads, settings, status, footer); shadow.append(style, panel, toggle); document.body.append(host);
   host.addEventListener('keydown', event => { if (event.key === 'Escape' && !panel.hidden) { togglePanel(panel, toggle); toggle.focus(); } });
   let targets = { detail: null, author: null }, sending = false, anchor = null;
-  let subscription=null,subscriptionFor='',subscriptionBusy=false,subscriptionLoaded=false;
+  let subscription=null,subscriptionFor='',subscriptionBusy=false,subscriptionLoaded=false,authors=null,subscriptionGeneration=0;
   style.textContent+='.creator-row{display:flex;align-items:center;gap:7px}.creator-row .creator{flex:1;min-width:0}.creator-row select{flex:none;width:88px;margin:0;padding:4px 5px;font-size:11px}.subscribe{flex:none;width:25px;padding:0;background:transparent;color:#ffffff80;font-size:23px;line-height:28px;text-align:center}.subscribe[aria-pressed=true]{color:#ff4f78}.subscribe:hover{background:transparent;color:#fff}.subscribe[aria-pressed=true]:hover{color:#ff718e}';
   function subscriptionRequest(method,path,body){return new Promise((resolve,reject)=>{
     let server;try{server=normalizeServer(GM_getValue('library_server',''));}catch{reject(new Error('请先配置网站地址。'));return;}
@@ -125,28 +125,31 @@
   });}
   function paintSubscription(){
     const checked=subscriptionLoaded&&subscriptionFor===targets.author&&Boolean(subscription?.enabled);
-    subscribe.textContent=checked?'♥':'♡';subscribe.setAttribute('aria-pressed',String(checked));subscribe.title=checked?'停止追更，保留已有作品':subscriptionLoaded?'按所选周期订阅此博主':'正在核对网站订阅状态';
+    subscribe.textContent=checked?'♥':'♡';subscribe.setAttribute('aria-pressed',String(checked));subscribe.title=checked?'停止追更，保留已有作品':subscriptionLoaded?'按所选周期订阅此博主':subscriptionBusy?'正在核对网站订阅状态':'点击重新核对网站订阅状态';
     subscribe.disabled=subscriptionBusy||!targets.author;frequency.disabled=subscriptionBusy||!targets.author;
   }
   async function loadSubscription(){
     if(panel.hidden||settings.open||subscriptionBusy||!targets.author||subscriptionFor===targets.author)return;
     const link=targets.author;subscriptionFor=link;subscription=null;subscriptionLoaded=false;paintSubscription();
     if(!GM_getValue('library_server','')||!GM_getValue('library_token','')){subscribe.title='先在连接设置中配置网站';return;}
+    if(authors){const found=subscriptionState(authors,link);subscription=found.author;subscriptionLoaded=true;frequency.value=found.frequency;paintSubscription();return;}
+    const generation=subscriptionGeneration;
     subscriptionBusy=true;paintSubscription();
-    try{const authors=await subscriptionRequest('GET','/api/authors');if(!Array.isArray(authors))throw new Error('网站订阅列表格式异常');
-      if(targets.author===link){const found=subscriptionState(authors,link);subscription=found.author;subscriptionLoaded=true;frequency.value=found.frequency;}
-    }catch(error){if(targets.author===link){status.textContent=error.message;subscriptionFor='';}}
-    finally{subscriptionBusy=false;paintSubscription();}
+    try{const result=await subscriptionRequest('GET','/api/authors');if(!Array.isArray(result))throw new Error('网站订阅列表格式异常');
+      if(generation===subscriptionGeneration){authors=result;subscriptionFor='';}
+    }catch(error){if(generation===subscriptionGeneration){status.textContent=error.message;subscriptionFor=targets.author;}}
+    finally{subscriptionBusy=false;paintSubscription();if(generation!==subscriptionGeneration||authors)loadSubscription();}
   }
   async function saveSubscription(changeFrequency=false){
     if(subscriptionBusy||!targets.author)return;
     if(!GM_getValue('library_server','')||!GM_getValue('library_token','')){configure();status.textContent='请先配置网站，再设置追更。';return;}
-    if(!subscriptionLoaded||subscriptionFor!==targets.author){subscriptionFor='';await loadSubscription();if(!subscriptionLoaded)return;}
-    const link=targets.author,turnOff=Boolean(subscription?.enabled)&&!changeFrequency;subscriptionBusy=true;paintSubscription();
+    const link=targets.author;
+    if(!subscriptionLoaded||subscriptionFor!==link){subscriptionFor='';await loadSubscription();if(!subscriptionLoaded||targets.author!==link)return;}
+    const turnOff=Boolean(subscription?.enabled)&&!changeFrequency,generation=subscriptionGeneration;subscriptionBusy=true;paintSubscription();
     try{const saved=subscription?.id?await subscriptionRequest('PATCH',`/api/authors/${encodeURIComponent(subscription.id)}`,turnOff?{enabled:false}:{frequency:frequency.value}):await subscriptionRequest('POST','/api/authors',{url:link,name:creator.textContent.replace(/^@+/,'').slice(0,100),frequency:frequency.value});
-      if(targets.author===link){subscription=saved;subscriptionLoaded=true;subscriptionFor=link;status.textContent=turnOff?'已停止追更，已有作品保留。':`已订阅 · ${frequency.selectedOptions[0].textContent}`;}
-    }catch(error){if(targets.author===link){status.textContent=error.message;subscriptionFor='';subscriptionLoaded=false;}}
-    finally{subscriptionBusy=false;paintSubscription();}
+      if(generation===subscriptionGeneration){authors=null;if(targets.author===link){subscription=saved;subscriptionLoaded=true;subscriptionFor=link;status.textContent=turnOff?'已停止追更，已有作品保留。':`已订阅 · ${frequency.selectedOptions[0].textContent}`;}}
+    }catch(error){if(generation===subscriptionGeneration&&targets.author===link){status.textContent=error.message;subscriptionFor=link;subscriptionLoaded=false;}}
+    finally{subscriptionBusy=false;paintSubscription();if(generation!==subscriptionGeneration||targets.author!==link)loadSubscription();}
   }
   subscribe.addEventListener('click',()=>saveSubscription());
   frequency.addEventListener('change',()=>{if(subscriptionLoaded&&subscription?.enabled)saveSubscription(true);});
@@ -164,7 +167,7 @@
     GM_setValue('library_server', server); GM_setValue('library_token', token.trim());
     GM_setValue('library_default_kind', defaultKind(preference.value)); tokenInput.value = '';
     libraryLink.href = `${server}/#tasks`; libraryLink.hidden = false;
-    prioritize(); settings.open = false;subscriptionFor='';status.textContent = '设置已保存，点击下载按钮才会发送。'; position();loadSubscription();
+    prioritize(); settings.open = false;authors=null;subscriptionGeneration++;subscriptionFor='';status.textContent = '设置已保存，点击下载按钮才会发送。'; position();loadSubscription();
   });
   GM_registerMenuCommand('Cloudrift · 连接与默认下载设置', configure);
   function prioritize() {

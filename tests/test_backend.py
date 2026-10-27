@@ -200,8 +200,8 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
         with patch('app.store.time.time', return_value=next_due - 1):
             self.service.schedule()
             self.assertFalse(await self.service.process_one())
-        with patch('app.store.time.time', return_value=next_due + 1):
-            self.store.set_setting('scheduler_next_release', 0)
+        ready_at = max(next_due, self.store.setting('queue_resume_at')) + 1
+        with patch('app.store.time.time', return_value=ready_at):
             self.service.schedule()
             await self.service.process_one()
         self.assertEqual(self.core.download_calls, 2)

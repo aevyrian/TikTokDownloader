@@ -18,14 +18,27 @@ FILENAME = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2})-(视频|图集|
 
 
 def recorded_download(root, work_id):
+    return bool(recorded_downloads(root, [work_id]))
+
+
+def recorded_downloads(root, work_ids):
+    work_ids = tuple(dict.fromkeys(work_ids))
+    if not work_ids:
+        return set()
     path = Path(root)/'DouK-Downloader.db'
     if not path.exists():
-        return False
+        return set()
     if not path.resolve().is_relative_to(Path(root).resolve()):
         raise RuntimeError('旧下载记录路径异常，已停止以免重复下载')
     try:
         with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=5)) as db:
-            return db.execute('SELECT 1 FROM download_data WHERE ID=? LIMIT 1',(work_id,)).fetchone() is not None
+            found = set()
+            for start in range(0, len(work_ids), 900):
+                batch = work_ids[start:start + 900]
+                placeholders = ','.join('?' for _ in batch)
+                found.update(row[0] for row in db.execute(
+                    f'SELECT ID FROM download_data WHERE ID IN ({placeholders})', batch))
+            return found
     except sqlite3.Error as exc:
         raise RuntimeError('旧下载记录暂时无法读取，已停止以免重复下载，恢复后可重试') from exc
 

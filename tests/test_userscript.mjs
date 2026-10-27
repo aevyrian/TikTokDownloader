@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const script = new URL('../userscripts/douyin-send.user.js', import.meta.url);
@@ -109,4 +110,65 @@ assert.equal(moveGallery(0, -1, 3), 0);
 assert.equal(moveGallery(1, 1, 3), 2);
 assert.equal(moveGallery(2, 1, 3), 2);
 assert.equal(moveGallery(0, 1, 0), 0);
-console.log('PASS: 作品/作者识别、精确 ID、恶意地址拒绝、媒体凭据边界、视图暂停、图集边界');
+// Execute the Sender with a small browser stub so request counts and response ordering are observable.
+const elements=[];
+function element(tag) {
+  const listeners={};
+  const el={tag,style:{},classList:{toggle(){}},children:[],hidden:false,open:false,textContent:'',value:'',
+    append(...items){this.children.push(...items)},replaceChildren(...items){this.children=items},
+    setAttribute(){},addEventListener(name,fn){listeners[name]=fn},focus(){},contains(){return false},
+    querySelector(){return null},querySelectorAll(){return []},getBoundingClientRect(){return {width:0,height:0}},
+    attachShadow(){return element('shadow')},click(){listeners.click?.({})}};
+  elements.push(el);return el;
+}
+const requests=[], callbacks={};
+const page={href:subscribedURL,pathname:new URL(subscribedURL).pathname};
+const doc={body:element('body'),createElement:element,querySelector(selector){return selector==='h1'?{textContent:'博主'}:null},querySelectorAll(){return []},addEventListener(){}};
+runInNewContext(readFileSync(script,'utf8'),{URL,document:doc,location:page,innerWidth:1200,innerHeight:800,
+  GM_getValue(key,fallback){return ({library_server:'http://nas.example:8090',library_token:'test-token'})[key]??fallback},
+  GM_setValue(){},GM_registerMenuCommand(){},GM_xmlhttpRequest(request){requests.push(request)},
+  ResizeObserver:class{observe(){}},MutationObserver:class{observe(){}},addEventListener(){},
+  setInterval(fn){callbacks.detect=fn},setTimeout(){},clearTimeout(){}});
+const toggleSender=elements.find(el=>el.title==='Cloudrift · 下载到媒体库');
+const subscriptionButton=elements.find(el=>el.className==='subscribe');
+const authorB='https://www.douyin.com/user/MS4wLjABAAAA_someone_else';
+toggleSender.click();
+assert.equal(requests.length,1,'打开面板只请求一次订阅列表');
+page.href=authorB;page.pathname=new URL(authorB).pathname;callbacks.detect();
+requests[0].onload({status:200,responseText:JSON.stringify([{id:'b',url:authorB,enabled:true}])});
+await new Promise(resolve=>setImmediate(resolve));
+assert.equal(requests.length,1,'切换博主应复用在途列表请求');
+assert.equal(subscriptionButton.textContent,'♥','在途请求完成后立即显示当前博主状态');
+page.href=subscribedURL;page.pathname=new URL(subscribedURL).pathname;callbacks.detect();
+await new Promise(resolve=>setImmediate(resolve));
+assert.equal(requests.length,1,'切换博主复用已加载的列表');
+toggleSender.click();toggleSender.click();
+assert.equal(requests.length,2,'重新打开面板时刷新订阅列表');
+requests[1].onload({status:401,responseText:JSON.stringify({detail:'密钥错误'})});
+await new Promise(resolve=>setImmediate(resolve));
+assert.ok(elements.some(el=>el.textContent==='密钥错误'),'认证失败保留网站提示');
+callbacks.detect();callbacks.detect();
+assert.equal(requests.length,2,'认证失败后不能反复自动请求');
+subscriptionButton.click();
+assert.equal(requests.length,3,'用户点击订阅时可重新尝试');
+assert.equal(requests[2].timeout,15000);
+page.href=authorB;page.pathname=new URL(authorB).pathname;callbacks.detect();
+requests[2].onload({status:200,responseText:JSON.stringify([{id:'b',url:authorB,enabled:true}])});
+await new Promise(resolve=>setImmediate(resolve));
+assert.equal(requests.length,3,'重试期间切换作者不得替新作者提交订阅');
+assert.equal(subscriptionButton.textContent,'♥');
+toggleSender.click();toggleSender.click();
+assert.equal(requests.length,4);
+toggleSender.click();toggleSender.click();
+requests[3].onload({status:200,responseText:'[]'});
+await new Promise(resolve=>setImmediate(resolve));
+assert.equal(requests.length,5,'重新打开面板后忽略旧请求并重新读取');
+requests[4].onload({status:200,responseText:JSON.stringify([{id:'b',url:authorB,enabled:true}])});
+await new Promise(resolve=>setImmediate(resolve));
+assert.equal(subscriptionButton.textContent,'♥','旧响应不能覆盖重新打开后的状态');
+elements.find(el=>el.textContent==='下载博主全部作品').click();
+assert.equal(requests.length,6);
+assert.equal(requests[5].timeout,20000,'慢速提交保留原有等待时间');
+requests[5].onload({status:200,responseText:JSON.stringify({id:'123'})});
+assert.ok(elements.some(el=>el.textContent==='网站已收到任务 #123。下载进度请到网站查看。'),'收到任务不等于下载完成');
+console.log('PASS: 作品/作者识别、订阅请求复用与失败重试、媒体凭据边界、视图暂停、图集边界');
