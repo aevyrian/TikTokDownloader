@@ -48,7 +48,7 @@ class AuthorNode {
   setAttribute() {}
 }
 const authorList = new AuthorNode('div');
-const authorState = { navigation: 1, view: 'favorites' };
+const authorState = { navigation: 1, authorsGeneration: 0, view: 'favorites' };
 let interval = 4320;
 const authorContext = vm.createContext({
   state: authorState, $: id => ['favorite-author-list', 'author-list'].includes(id) ? authorList : { value: '' },
@@ -73,6 +73,17 @@ await authorContext.loadAuthors();
 authorList.children[1].children[1].children.find(node => node.tagName === 'select').value = 'weekly';
 await authorList.children[1].children[1].children.find(node => node.textContent === '保存方式').invoke();
 assert.equal(authorList.children[1].children[0].children[0].children[1].textContent, '每7天更新', '订阅页保存频率后应立即刷新卡片');
+
+for (const favoritesOnly of [false, true]) {
+  authorState.view = favoritesOnly ? 'favorites' : 'authors';
+  const pending = [];
+  authorContext.api = () => new Promise(resolve => pending.push(resolve));
+  const older = authorContext.loadAuthors(favoritesOnly);
+  const newer = authorContext.loadAuthors(favoritesOnly);
+  pending[1]([]); await newer;
+  pending[0]([{ id: 'removed', name: '已取消收藏', favorite: true }]); await older;
+  assert.equal(authorList.children.length, 1, '迟到的旧列表不得覆盖最新博主状态');
+}
 
 const panels = ['library', 'tasks', 'authors', 'settings'].map(view => ({ id: `view-${view}`, hidden: true }));
 const nodes = Object.fromEntries(['application', 'page-title', 'page-eyebrow'].map(id => [id, { dataset: {} }]));

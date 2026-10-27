@@ -24,7 +24,7 @@
   if (typeof module !== 'undefined' && module.exports) { module.exports = { mediaURL, switchView, moveGallery, isVideoFile, authorInitial, keyError, taskTitle, playVisible, applySound, releasePlayback, preloadVideos }; return; }
   const $ = id => document.getElementById(id);
   if (location.protocol === 'file:') { $('connect-form').hidden = true; $('local-preview').hidden = false; return; }
-  const state = { token: localStorage.getItem('library_access_key') || '', muted:true, favoriteKind:'works', auth: null, view: 'library', items: [], total: 0, generation: 0, navigation: 0, busy: false };
+  const state = { token: localStorage.getItem('library_access_key') || '', muted:true, favoriteKind:'works', auth: null, view: 'library', items: [], total: 0, generation: 0, authorsGeneration: 0, navigation: 0, busy: false };
   const frequencies={once:'不订阅',three_days:'每3天更新',weekly:'每7天更新',monthly:'每月更新',quarterly:'每季度更新',yearly:'每年更新'};
   const frequencyValues={1440:'three_days',4320:'three_days',10080:'weekly',43200:'monthly',129600:'quarterly',525600:'yearly'};
   const statusNames = { queued: '已排队', paused:'已暂停', parsing: '正在解析', awaiting_confirmation: '等待画质确认', downloading: '正在下载', completed: '完整保存', failed: '失败', interrupted: '已中断', cancelled: '已取消' };
@@ -326,8 +326,8 @@
     if (navigation === state.navigation && state.view === 'tasks') taskView.update(tasks);
   }
   async function loadAuthors(favoritesOnly=false) {
-    const navigation = state.navigation, authors = await api('/api/authors/history');
-    if (navigation !== state.navigation || state.view !== (favoritesOnly?'favorites':'authors')) return;
+    const generation = ++state.authorsGeneration, navigation = state.navigation, authors = await api('/api/authors/history');
+    if (generation !== state.authorsGeneration || navigation !== state.navigation || state.view !== (favoritesOnly?'favorites':'authors')) return;
     const container=$(favoritesOnly?'favorite-author-list':'author-list');container.replaceChildren();
     const order=$('author-sort').value,visible=authors.filter(a=>!favoritesOnly||a.favorite);
     visible.sort((a,b)=>Number(Boolean(b.starred))-Number(Boolean(a.starred))||(order==='name'?(a.name||'').localeCompare(b.name||'','zh-CN'):order==='next'?(a.enabled?a.next_check:Infinity)-(b.enabled?b.next_check:Infinity):order==='last'?new Date(typeof b.last_checked==='number'?b.last_checked*1000:b.last_checked||0)-new Date(typeof a.last_checked==='number'?a.last_checked*1000:a.last_checked||0):Number(b.enabled)-Number(a.enabled)));

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cloudrift Sender
 // @namespace    douyin-local-library
-// @version      1.6.1
+// @version      1.6.2
 // @description  一键下载作品或博主，按日、周、月订阅更新并同步网站收藏状态。
 // @match        https://www.douyin.com/*
 // @match        https://douyin.com/*
@@ -108,7 +108,7 @@
   preference.value = defaultKind(GM_getValue('library_default_kind', 'author')); field('默认下载内容', preference);
   const save = document.createElement('button'); save.type = 'submit'; save.textContent = '保存设置'; form.append(save); settings.append(summary, form);
   const footer = document.createElement('div'); footer.className = 'footer';
-  const version = document.createElement('small'); version.textContent = 'SENDER 1.6.1';
+  const version = document.createElement('small'); version.textContent = 'SENDER 1.6.2';
   const libraryLink = document.createElement('a'); libraryLink.textContent = '查看任务 ↗'; libraryLink.target = '_blank'; libraryLink.rel = 'noopener noreferrer'; libraryLink.hidden = true;
   const status = document.createElement('p'); status.className = 'status'; status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
   const downloads = document.createElement('div'); downloads.className = 'downloads'; downloads.append(creatorRow, authorLink, actions, hint);
@@ -143,9 +143,10 @@
   async function saveSubscription(changeFrequency=false){
     if(subscriptionBusy||!targets.author)return;
     if(!GM_getValue('library_server','')||!GM_getValue('library_token','')){configure();status.textContent='请先配置网站，再设置追更。';return;}
-    const link=targets.author;
+    const link=targets.author,selectedFrequency=frequency.value;
     if(!subscriptionLoaded||subscriptionFor!==link){subscriptionFor='';await loadSubscription();if(!subscriptionLoaded||targets.author!==link)return;}
     const turnOff=Boolean(subscription?.enabled)&&!changeFrequency,generation=subscriptionGeneration;subscriptionBusy=true;paintSubscription();
+    if(!turnOff)frequency.value=selectedFrequency;
     try{const saved=subscription?.id?await subscriptionRequest('PATCH',`/api/authors/${encodeURIComponent(subscription.id)}`,turnOff?{enabled:false}:{frequency:frequency.value}):await subscriptionRequest('POST','/api/authors',{url:link,name:creator.textContent.replace(/^@+/,'').slice(0,100),frequency:frequency.value});
       if(generation===subscriptionGeneration){authors=null;if(targets.author===link){subscription=saved;subscriptionLoaded=true;subscriptionFor=link;status.textContent=turnOff?'已停止追更，已有作品保留。':`已订阅 · ${frequency.selectedOptions[0].textContent}`;}}
     }catch(error){if(generation===subscriptionGeneration&&targets.author===link){status.textContent=error.message;subscriptionFor=link;subscriptionLoaded=false;}}
@@ -218,9 +219,10 @@
     const link = targets[kind];
     if (!link || sending) return;
     if (!GM_getValue('library_server', '') || !GM_getValue('library_token', '')) { configure(); status.textContent = '请先完成下方连接设置，再点击下载。'; return; }
-    if (recent.has(link)) { status.textContent = '这个页面的对象已发送，请到网站查看任务。'; return; }
     const server = GM_getValue('library_server', '');
     try { normalizeServer(server); } catch { status.textContent = '网站地址无效，请重新配置。'; return; }
+    const recentKey = JSON.stringify([server, link]);
+    if (recent.has(recentKey)) { status.textContent = '这个页面的对象已发送，请到网站查看任务。'; return; }
     sending = true; detect(); status.textContent = '正在向网站提交…';
     libraryLink.href = `${server}/#tasks`; libraryLink.hidden = false;
     try { GM_xmlhttpRequest({
@@ -231,7 +233,7 @@
         sending = false; detect();
         let data; try { data = JSON.parse(response.responseText); } catch { data = {}; }
         if (response.status >= 200 && response.status < 300 && data.id !== undefined) {
-          recent.add(link); status.textContent = targets[kind] === link ? `网站已收到任务 #${data.id}。下载进度请到网站查看。` : '';
+          recent.add(recentKey); if (GM_getValue('library_server', '') === server) status.textContent = targets[kind] === link ? `网站已收到任务 #${data.id}。下载进度请到网站查看。` : '';
         } else { status.textContent = typeof data.detail === 'string' ? data.detail : `提交失败（${response.status}），请检查网站地址与密钥。`; }
       },
       onerror() { sending = false; detect(); status.textContent = '网站不可达，请检查 NAS 连接和网站地址后重试。'; },

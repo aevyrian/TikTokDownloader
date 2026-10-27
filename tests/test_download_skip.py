@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'vendor' / 'TikTokDownloader'))
 
@@ -43,6 +43,42 @@ class DownloadSkipTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await self.queue_video(root), ([], {WORK_ID}))
             self.assertEqual(video.read_bytes(), b'saved-video')
             self.assertEqual(video.stat().st_mtime_ns, before)
+
+    async def test_existing_other_video_format_prevents_retry_overwrite(self):
+        for suffix in ('mov', 'm4v', 'mkv', 'webm'):
+            with self.subTest(suffix=suffix), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                video = root / f'{WORK_ID}.{suffix}'
+                video.write_bytes(b'saved-video')
+                (root / f'{WORK_ID}.mp4').touch()
+                self.assertEqual(await self.queue_video(root), ([], {WORK_ID}))
+                self.assertEqual(video.read_bytes(), b'saved-video')
+
+    async def test_other_video_directory_is_preserved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            directory = root / f'{WORK_ID}.mov'
+            directory.mkdir()
+            (directory / 'keep').write_bytes(b'keep')
+            self.assertEqual(await self.queue_video(root), ([], {WORK_ID}))
+            self.assertEqual((directory / 'keep').read_bytes(), b'keep')
+
+    async def test_other_video_symlink_is_not_queued(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(Path, 'is_symlink', autospec=True,
+                              side_effect=lambda path: path.name == f'{WORK_ID}.mov'):
+                self.assertEqual(await self.queue_video(root), ([], {WORK_ID}))
+
+    async def test_other_zero_byte_video_does_not_block_retry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            other = root / f'{WORK_ID}.mov'
+            other.touch()
+            tasks, skipped = await self.queue_video(root)
+            self.assertEqual([task[2] for task in tasks], [root / f'{WORK_ID}.mp4'])
+            self.assertEqual(skipped, set())
+            self.assertEqual(other.read_bytes(), b'')
 
     async def test_missing_video_is_queued(self):
         with tempfile.TemporaryDirectory() as tmp:

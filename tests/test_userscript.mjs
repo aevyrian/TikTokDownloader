@@ -118,15 +118,15 @@ function element(tag) {
     append(...items){this.children.push(...items)},replaceChildren(...items){this.children=items},
     setAttribute(){},addEventListener(name,fn){listeners[name]=fn},focus(){},contains(){return false},
     querySelector(){return null},querySelectorAll(){return []},getBoundingClientRect(){return {width:0,height:0}},
-    attachShadow(){return element('shadow')},click(){listeners.click?.({})}};
+    attachShadow(){return element('shadow')},click(){listeners.click?.({})},submit(){listeners.submit?.({preventDefault(){}})}};
   elements.push(el);return el;
 }
-const requests=[], callbacks={};
+const requests=[], callbacks={}, storage={library_server:'http://nas.example:8090',library_token:'test-token'};
 const page={href:subscribedURL,pathname:new URL(subscribedURL).pathname};
 const doc={body:element('body'),createElement:element,querySelector(selector){return selector==='h1'?{textContent:'博主'}:null},querySelectorAll(){return []},addEventListener(){}};
 runInNewContext(readFileSync(script,'utf8'),{URL,document:doc,location:page,innerWidth:1200,innerHeight:800,
-  GM_getValue(key,fallback){return ({library_server:'http://nas.example:8090',library_token:'test-token'})[key]??fallback},
-  GM_setValue(){},GM_registerMenuCommand(){},GM_xmlhttpRequest(request){requests.push(request)},
+  GM_getValue(key,fallback){return storage[key]??fallback},
+  GM_setValue(key,value){storage[key]=value},GM_registerMenuCommand(){},GM_xmlhttpRequest(request){requests.push(request)},
   ResizeObserver:class{observe(){}},MutationObserver:class{observe(){}},addEventListener(){},
   setInterval(fn){callbacks.detect=fn},setTimeout(){},clearTimeout(){}});
 const toggleSender=elements.find(el=>el.title==='Cloudrift · 下载到媒体库');
@@ -171,4 +171,34 @@ assert.equal(requests.length,6);
 assert.equal(requests[5].timeout,20000,'慢速提交保留原有等待时间');
 requests[5].onload({status:200,responseText:JSON.stringify({id:'123'})});
 assert.ok(elements.some(el=>el.textContent==='网站已收到任务 #123。下载进度请到网站查看。'),'收到任务不等于下载完成');
+elements.find(el=>el.textContent==='下载博主全部作品').click();
+assert.equal(requests.filter(request=>request.url.endsWith('/api/tasks')).length,1,'同一网站仍阻止重复发送');
+toggleSender.click();toggleSender.click();
+requests.at(-1).onerror();
+await new Promise(resolve=>setImmediate(resolve));
+const frequency=elements.find(el=>el.tag==='select'&&el.children.some(child=>child.value==='weekly'));
+frequency.value='weekly';subscriptionButton.click();
+requests.at(-1).onload({status:200,responseText:'[]'});
+await new Promise(resolve=>setImmediate(resolve));
+assert.equal(JSON.parse(requests.at(-1).data).frequency,'weekly','查询失败后重试应保留用户选择的周期');
+frequency.selectedOptions=[{textContent:'每7天更新'}];
+requests.at(-1).onload({status:200,responseText:JSON.stringify({id:'b',url:authorB,enabled:true,interval_minutes:10080})});
+await new Promise(resolve=>setImmediate(resolve));
+const serverInput=elements.find(el=>el.type==='url'), settingsForm=elements.find(el=>el.tag==='form');
+const authorButton=elements.find(el=>el.textContent==='下载博主全部作品');
+serverInput.value='https://other.example';settingsForm.submit();
+authorButton.click();
+assert.equal(requests.filter(request=>request.url.endsWith('/api/tasks')).length,2,'切换网站后同一博主仍可发送');
+assert.equal(requests.at(-1).url,'https://other.example/api/tasks');
+serverInput.value='https://third.example';settingsForm.submit();
+const status=elements.find(el=>el.className==='status');
+const statusAfterSwitch=status.textContent;
+requests.at(-1).onload({status:200,responseText:JSON.stringify({id:'456'})});
+assert.equal(status.textContent,statusAfterSwitch,'旧网站的成功回调不能冒充当前网站的任务');
+authorButton.click();
+assert.equal(requests.filter(request=>request.url.endsWith('/api/tasks')).length,3,'旧网站请求完成后不能拦截新网站');
+assert.equal(requests.at(-1).url,'https://third.example/api/tasks');
+page.href=subscribedURL;page.pathname=new URL(subscribedURL).pathname;callbacks.detect();
+requests.at(-1).onload({status:200,responseText:JSON.stringify({id:'789'})});
+assert.equal(status.textContent,'','切换博主后旧任务成功不能显示为当前博主的任务');
 console.log('PASS: 作品/作者识别、订阅请求复用与失败重试、媒体凭据边界、视图暂停、图集边界');

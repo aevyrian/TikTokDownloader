@@ -22,7 +22,7 @@ from .legacy import LegacyIndex, recorded_download, recorded_downloads
 from .playback import PlaybackCache
 
 
-VERSION = "1.3.3"
+VERSION = "1.3.4"
 BASE = Path(__file__).resolve().parent
 
 

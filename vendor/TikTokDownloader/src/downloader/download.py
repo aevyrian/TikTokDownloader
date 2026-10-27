@@ -486,18 +486,18 @@ class Downloader:
                 )
             )
             return
-        if await self.is_skip(
-            id_,
-            p := actual_root.with_name(
-                f"{name}.{suffix}",
-            ),
-        ):
+        p = actual_root.with_name(f"{name}.{suffix}")
+        paths = (actual_root.with_name(f"{name}.{extension}")
+                 for extension in {suffix, "mp4", "m4v", "mov", "mkv", "webm"})
+        existing = next((path for path in paths if path.is_symlink() or
+                         (path.exists() and (not path.is_file() or path.stat().st_size > 0))), p)
+        if await self.is_skip(id_, existing):
             self.log.info(
                 _("【{type}】{name} 存在下载记录或文件已存在，跳过下载").format(
                     type=type_, name=name
                 )
             )
-            self.log.info(f"文件路径: {p.resolve()}", False)
+            self.log.info(f"文件路径: {existing.resolve()}", False)
             skipped.add(id_)
             return
         tasks.append(
