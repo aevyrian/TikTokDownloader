@@ -3,7 +3,7 @@
 // @name:zh      抖音收藏库助手
 // @name:zh-CN   抖音收藏库助手
 // @namespace    douyin-local-library
-// @version      1.8.3
+// @version      1.8.6
 // @description  识别当前作品与博主，查看更新状态，按需下载并设置追更周期。
 // @match        https://www.douyin.com/*
 // @match        https://douyin.com/*
@@ -85,7 +85,7 @@
 section{position:fixed;width:304px;padding:17px;background:#24252bf7;border:1px solid #ffffff20;border-radius:15px;box-shadow:0 14px 44px #0005;max-height:calc(100dvh - 24px);overflow:auto;scrollbar-width:thin}
 header,.identity,.status-heading,.status-times,.quick-actions,.footer{display:flex;align-items:center;gap:8px}header{justify-content:space-between;margin-bottom:13px}header strong{font-size:14px}header small{font-size:10px;color:#afb0bb;margin-left:8px}
 button,input,select{font:inherit;color:inherit}button,a,input,select,summary{outline-offset:3px}button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid #ff8ba5}button{cursor:pointer;border:1px solid #ffffff1c;border-radius:9px;background:#ffffff06;padding:9px 11px;text-align:center}button:hover{background:#ffffff10}button:disabled{cursor:default;opacity:.48}
-.close{width:28px;height:28px;padding:0;font-size:22px;line-height:1;border:0;background:transparent;color:#b9bac5}.toggle{display:grid;place-items:center;width:44px;height:44px;padding:0;border-radius:12px;background:#27283080;border-color:#ffffff24;box-shadow:0 3px 12px #0002}.toggle:hover{background:#272830a6;border-color:#ffffff38}.toggle[aria-expanded=true]{color:#ff8ba5;background:#303039b3;border-color:#ff8ba570}.toggle svg{pointer-events:none}
+.close{width:28px;height:28px;padding:0;font-size:22px;line-height:1;border:0;background:transparent;color:#b9bac5}.toggle{display:grid;place-items:center;width:44px;height:44px;padding:0;border-radius:12px;color:#fff;background:#00000047;border-color:#ffffff30;box-shadow:none}.toggle:hover{background:#0006;border-color:#ffffff4d}.toggle[aria-expanded=true]{color:#fff;background:#00000073;border-color:#ffffff66}.toggle svg{pointer-events:none}
 .identity{margin-bottom:12px;min-width:0}.creator{font-size:14px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.context-label{flex:none;font-size:10px;color:#aaaab6}.creator-status{padding:12px;border:1px solid #ffffff1d;border-radius:10px;background:#ffffff04;margin-bottom:12px;transition:background .15s,border-color .15s}.creator-status[data-state=submitted]{background:#ff507716;border-color:#ff78976b}.status-heading{justify-content:space-between;margin-bottom:9px}.subscription-state{font-weight:600;font-size:12px}.subscription-state:before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:7px;background:#9699ad}.creator-status[data-enabled=true] .subscription-state:before{background:#ff8ba5}.refresh-state{padding:0;background:transparent;border:0;font-size:10px;color:#c5c6d1}
 .status-times{align-items:start;gap:10px}.status-times>div{flex:1;min-width:0}.status-times small{display:block;font-size:10px;color:#a8a9b5}.last-success,.next-check{display:block;font-size:11px;margin-top:2px;overflow-wrap:anywhere}.state-note{margin:8px 0 0;font-size:10px;color:#c2c3ce;overflow-wrap:anywhere}
 .actions{display:grid;gap:8px}.actions>button{width:100%;min-height:39px}.quick-actions>*{flex:1;min-width:0}.quick-actions button,.quick-actions a{font-size:11px;min-height:37px}.primary{background:#ff507710;border-color:#ff789749;font-weight:600}.primary:hover{background:#ff50771c}a{color:#d4d5df;text-decoration:none}.archive-link{display:flex;align-items:center;justify-content:center;border:1px solid #ffffff1c;border-radius:9px;padding:8px}
@@ -95,7 +95,7 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
   `;
   const panel=node('section');panel.hidden=true;panel.setAttribute('aria-label','抖音收藏库下载面板');
   const toggle=node('button','toggle');toggle.title='抖音收藏库 · 下载到媒体库';
-  toggle.innerHTML='<svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg>';
+  toggle.innerHTML='<svg viewBox="0 0 28 28" width="26" height="26" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 19.5H7a4.5 4.5 0 0 1-.6-8.96 6.5 6.5 0 0 1 12.4-2.7A5 5 0 0 1 20 17.7h-.9" stroke="currentColor" stroke-width="2.3"/><path d="M14 12.5v11m-4-4 4 4 4-4" stroke="#111" stroke-opacity=".6" stroke-width="4.8"/><path d="M14 12.5v11m-4-4 4 4 4-4" stroke="currentColor" stroke-width="2.7"/></svg>';
   toggle.setAttribute('aria-label','打开媒体库发送菜单');toggle.setAttribute('aria-expanded','false');
   const header=node('header'), brand=node('div'), title=node('strong','','抖音收藏库'), subtitle=node('small','','下载与归档'),close=node('button','close','×');
   close.setAttribute('aria-label','收起下载面板');brand.append(title,subtitle);header.append(brand,close);
@@ -105,7 +105,7 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
   const times=node('div','status-times'),lastColumn=node('div'),nextColumn=node('div'),lastSuccess=node('span','last-success','暂无记录'),nextCheck=node('span','next-check','未设计划');
   lastColumn.append(node('small','','最近成功更新'),lastSuccess);nextColumn.append(node('small','','下次计划更新'),nextCheck);times.append(lastColumn,nextColumn);
   const stateNote=node('p','state-note','已有内容自动跳过。');card.append(heading,times,stateNote);
-  const detailButton=node('button','primary','下载当前作品'),authorButton=node('button','','立即更新博主'),libraryLink=node('a','archive-link','查看归档 ↗');libraryLink.target='_blank';libraryLink.rel='noopener noreferrer';
+  const detailButton=node('button','primary','下载当前作品'),authorButton=node('button','','下载全部作品'),libraryLink=node('a','archive-link','查看归档 ↗');libraryLink.target='_blank';libraryLink.rel='noopener noreferrer';
   const actions=node('div','actions'),quick=node('div','quick-actions');quick.append(authorButton,libraryLink);actions.append(detailButton,quick);
   const frequency=node('select');frequency.setAttribute('aria-label','博主更新周期');
   const labels={once:'仅下载一次',three_days:'每3天更新',weekly:'每7天更新',monthly:'每月更新',quarterly:'每季度更新',yearly:'每年更新'};
@@ -119,7 +119,7 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
   const preference=node('select');for(const [value,text] of [['detail','突出当前作品'],['author','突出博主更新']]){const option=node('option','',text);option.value=value;preference.append(option);}preference.value=defaultKind(GM_getValue('library_default_kind','author'));
   function field(text,control){const label=node('label','',text);label.append(control);form.append(label);}
   field('网站地址',serverInput);field('管理员密钥',tokenInput);field('默认下载操作',preference);const save=node('button','','保存设置');save.type='submit';form.append(save);settings.append(summary,form);
-  const footer=node('div','footer');footer.append(node('small','','助手 1.8.3'),node('span','','下载后在媒体库查看进度'));
+  const footer=node('div','footer');footer.append(node('small','','助手 1.8.6'),node('span','','下载后在媒体库查看进度'));
   panel.append(header,downloads,status,settings,footer);shadow.append(style,panel,toggle);document.body.append(host);
   let targets={detail:null,author:null},anchor=null,authors=null,history=null,loading=null,generation=0,dataRevision=0,viewRevision=0,busy=false,frequencyDirty=false,settingsOverride=false,currentName='',stateAttempted=false;
   const recent=new Set(),feedback=new Map();
@@ -139,15 +139,15 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
   function paint(){
     const found=authorState(),author=found?.author;
     if(!frequencyDirty)frequency.value=author?author.enabled?found.frequency:'once':'once';
-    subscriptionLabel.textContent=!configured()?'未连接':loading?'核对中…':!authors?'待核对':author?author.enabled?labels[found.frequency]:'仅下载一次':'未订阅';
+    subscriptionLabel.textContent=!configured()?'未连接':loading?'核对中…':!authors?'待核对':author?.enabled?`已订阅 · ${labels[found.frequency]}`:'未订阅';
     card.dataset.enabled=String(Boolean(author?.enabled));
     const tasks=targets.author?(history||[]).filter(t=>t.kind==='author'&&(t.author_id&&t.author_id===author?.id||t.link&&resolveTargets(t.link).author===targets.author)):[];
     const success=tasks.filter(t=>t.status==='completed').sort((a,b)=>new Date(b.updated_at)-new Date(a.updated_at))[0];
     lastSuccess.textContent=success?formatTime(success.updated_at):'暂无记录';
     nextCheck.textContent=author?.enabled?(author.next_check?formatTime(author.next_check):'等待安排'):author?'不自动更新':'未设计划';
     const active=tasks.find(t=>['queued','parsing','downloading','awaiting_confirmation'].includes(t.status));
-    stateNote.textContent=active?(active.status==='downloading'?'博主作品正在下载。':'更新任务已在队列中。'):author?.last_error?'上次检查未完成，可立即更新重试。':'首次下载会检查历史作品；已有内容自动跳过。';
-    const buttons=[[detailButton,'detail',targets.detail,'下载当前作品'],[authorButton,'author',targets.author,'立即更新博主'],[submit,'plan',targets.author,frequency.value==='once'?'下载博主一次':'下载博主并订阅']];
+    stateNote.textContent=active?(active.status==='downloading'?'博主作品正在下载。':'更新任务已在队列中。'):author?.last_error?'上次检查未完成，可重新提交。':author?.enabled?'按当前订阅检查新作品；已有内容自动跳过。':'首次下载会检查历史作品；已有内容自动跳过。';
+    const buttons=[[detailButton,'detail',targets.detail,'下载当前作品'],[authorButton,'author',targets.author,author?.enabled?'更新当前订阅':'下载全部作品'],[submit,'plan',targets.author,frequency.value==='once'?'下载博主一次':'下载博主并订阅']];
     for(const [button,action,link,label] of buttons){const key=actionKey(action,link,action==='plan'?frequency.value:'');const state=feedback.get(key)||'';button.dataset.state=state;button.textContent=state==='submitted'?'已提交':state==='submitting'?'提交中…':label;button.disabled=busy||!link||state==='submitted';}
     card.dataset.state=buttons.some(([button])=>button.dataset.state==='submitted')?'submitted':'';
     frequency.disabled=busy||!targets.author;refresh.disabled=Boolean(loading)||busy||!targets.author;
@@ -164,7 +164,7 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
     loading=job;paint();return job;
   }
   function position(){const p=senderPosition(anchor,{width:innerWidth,height:innerHeight},panel.hidden?0:panel.offsetHeight);host.style.left=p.left+'px';host.style.top=p.top+'px';panel.style.left=p.panelLeft+'px';panel.style.top=p.panelTop+'px';panel.style.width=p.panelWidth+'px';}
-  function visible(element){if(!element)return false;const r=element.getBoundingClientRect();return r.width>0&&r.height>0&&r.bottom>0&&r.top<innerHeight;}
+  function visible(element){if(!element)return false;const r=element.getBoundingClientRect();return r.width>0&&r.height>0&&r.bottom>0&&r.top<innerHeight&&r.left+r.width>0&&r.left<innerWidth;}
   function detect(){
     const page=resolveTargets(location.href),profile=!page.detail&&/^\/user\/[A-Za-z0-9_-]{6,128}\/?$/.test(location.pathname);
     const details=[...document.querySelectorAll('[data-e2e="video-detail"], [data-e2e="note-detail"]')].filter(visible);
@@ -188,7 +188,8 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
     const named=[...(scope?.querySelectorAll('[data-e2e="user-info"] a[href*="/user/"]')||[])].find(a=>resolveTargets(a.href).author===targets.author&&a.textContent.trim());
     currentName=(profile?document.querySelector('h1')?.textContent:'')||named?.textContent||scope?.querySelector('[data-e2e="feed-video-nickname"]')?.textContent||current.author?.textContent||'';
     creator.textContent=currentName.trim()||'正在识别博主';contextLabel.textContent=profile?'· 博主页':'· 当前作品';
-    const rail=scope?.querySelector('[data-e2e="video-avatar"]')||scope?.querySelector('[data-e2e="user-info"] a[href*="/user/"]');anchor=visible(rail)?rail.getBoundingClientRect():null;
+    const rail=[...(scope?.querySelectorAll('[data-e2e="video-avatar"]')||[]),...(scope?.querySelectorAll('[data-e2e="user-info"] a[href*="/user/"]')||[])].find(el=>visible(el)&&(!targets.author||!el.href||resolveTargets(el.href).author===targets.author));
+    if(profile||!allowed)anchor=null;else if(rail)anchor=rail.getBoundingClientRect();
     for(let n=rail?.parentElement;n&&scope.contains(n);n=n.parentElement){const r=n.getBoundingClientRect();if(r.width>140)break;if(anchor&&visible(n)&&n.querySelector('[data-e2e="video-player-digg"]'))anchor={left:anchor.left,width:anchor.width,top:r.top};}
     if(scope!==observedScope){layoutObserver.disconnect();if(scope)layoutObserver.observe(scope);observedScope=scope;}
     paint();position();if(!panel.hidden&&!settings.open)loadState().catch(()=>{});
