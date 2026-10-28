@@ -115,99 +115,257 @@ assert.equal(moveGallery(0, -1, 3), 0);
 assert.equal(moveGallery(1, 1, 3), 2);
 assert.equal(moveGallery(2, 1, 3), 2);
 assert.equal(moveGallery(0, 1, 0), 0);
-// Execute the Sender with a small browser stub so request counts and response ordering are observable.
-const elements=[];
-function element(tag) {
-  const listeners={};
-  const el={tag,style:{},classList:{toggle(){}},children:[],hidden:false,open:false,textContent:'',value:'',
-    append(...items){this.children.push(...items)},replaceChildren(...items){this.children=items},
-    setAttribute(){},addEventListener(name,fn){listeners[name]=fn},focus(){},contains(){return false},
-    querySelector(){return null},querySelectorAll(){return []},getBoundingClientRect(){return {width:0,height:0}},
-    attachShadow(){return element('shadow')},click(){listeners.click?.({})},submit(){listeners.submit?.({preventDefault(){}})}};
-  elements.push(el);return el;
+// Execute the Sender in a small browser stub, exercising the actual request and UI flow.
+function browser(url = subscribedURL) {
+  const elements = [], requests = [], callbacks = {}, frame = [];
+  function element(tag) {
+    const listeners = {}, attrs = {};
+    const el = {tag, style:{}, dataset:{}, classList:{toggle(){},add(){},remove(){}}, children:[], hidden:false, open:false,
+      textContent:'', value:'', disabled:false, parentElement:null, offsetHeight:300,
+      append(...items){for(const item of items){item.parentElement=this;this.children.push(item)}},
+      replaceChildren(...items){this.children=[];this.append(...items)},
+      setAttribute(name,value){attrs[name]=String(value)},getAttribute(name){return attrs[name]??null},
+      addEventListener(name,fn){(listeners[name]??=[]).push(fn)},
+      dispatch(name,props={}){for(const fn of listeners[name]||[])fn({target:this,preventDefault(){},...props})},
+      click(){if(!this.disabled)this.dispatch('click')},submit(){this.dispatch('submit')},focus(){},
+      contains(node){return this===node||this.children.some(child=>child.contains?.(node))},
+      matches(){return false},closest(){return null},querySelector(){return null},querySelectorAll(){return []},
+      getBoundingClientRect(){return {width:0,height:0,top:0,bottom:0,left:0}},
+      attachShadow(){return element('shadow')},
+      get selectedOptions(){return this.children.filter(child=>child.value===this.value)}
+    };
+    elements.push(el);return el;
+  }
+  const page = new URL(url), storage={library_server:'http://nas.example:8090',library_token:'test-token'};
+  const doc={body:element('body'),createElement:element,
+    querySelector(selector){return selector==='h1'?{textContent:page.pathname.includes('someone_else')?'乙博主':'甲博主'}:null},
+    querySelectorAll(){return []},addEventListener(name,fn){callbacks['document:'+name]=fn}};
+  const observer=class {constructor(fn){callbacks.mutation=fn}observe(){}disconnect(){}};
+  runInNewContext(readFileSync(script,'utf8'),{URL,document:doc,location:page,innerWidth:1200,innerHeight:800,
+    GM_getValue(key,fallback){return storage[key]??fallback}, GM_setValue(key,value){storage[key]=value},
+    GM_registerMenuCommand(){},GM_xmlhttpRequest(request){requests.push(request)},
+    ResizeObserver:class{observe(){}disconnect(){}},MutationObserver:observer,
+    addEventListener(name,fn){callbacks[name]=fn},
+    requestAnimationFrame(fn){frame.push(fn);return frame.length},cancelAnimationFrame(){},
+    setInterval(fn){callbacks.detect=fn},setTimeout(fn){frame.push(fn);return frame.length},clearTimeout(){}});
+  const find=(value,prop='textContent')=>elements.find(el=>el[prop]===value);
+  const byClass=value=>elements.find(el=>el.className?.split(/\s+/).includes(value));
+  function go(next){page.href=next;callbacks.detect();while(frame.length)frame.shift()()}
+  function respond(request,data,status=200){assert.ok(request,'预期请求不存在');request.onload({status,responseText:JSON.stringify(data)})}
+  return {elements,requests,callbacks,frame,storage,page,find,byClass,go,respond,
+    host:elements.find(el=>el.id==='douyin-library-sender')};
 }
-const requests=[], callbacks={}, storage={library_server:'http://nas.example:8090',library_token:'test-token'};
-const page={href:subscribedURL,pathname:new URL(subscribedURL).pathname};
-const doc={body:element('body'),createElement:element,querySelector(selector){return selector==='h1'?{textContent:'博主'}:null},querySelectorAll(){return []},addEventListener(){}};
-runInNewContext(readFileSync(script,'utf8'),{URL,document:doc,location:page,innerWidth:1200,innerHeight:800,
-  GM_getValue(key,fallback){return storage[key]??fallback},
-  GM_setValue(key,value){storage[key]=value},GM_registerMenuCommand(){},GM_xmlhttpRequest(request){requests.push(request)},
-  ResizeObserver:class{observe(){}},MutationObserver:class{observe(){}},addEventListener(){},
-  setInterval(fn){callbacks.detect=fn},setTimeout(){},clearTimeout(){}});
-const toggleSender=elements.find(el=>el.title==='Cloudrift · 下载到媒体库');
-const subscriptionButton=elements.find(el=>el.className==='subscribe');
-const subscriptionLabel=elements.find(el=>el.className==='subscription-state');
+const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const authorB='https://www.douyin.com/user/MS4wLjABAAAA_someone_else';
-toggleSender.click();
-assert.equal(requests.length,1,'打开面板只请求一次订阅列表');
-assert.equal(subscriptionLabel.textContent,'核对中…','核对完成前不显示已订阅');
-page.href=authorB;page.pathname=new URL(authorB).pathname;callbacks.detect();
-requests[0].onload({status:200,responseText:JSON.stringify([{id:'b',url:authorB,enabled:true}])});
-await new Promise(resolve=>setImmediate(resolve));
-assert.equal(requests.length,1,'切换博主应复用在途列表请求');
-assert.equal(subscriptionButton.textContent,'♥','在途请求完成后立即显示当前博主状态');
-assert.equal(subscriptionLabel.textContent,'追更已开启','订阅分区显示当前博主的实际状态');
-page.href=subscribedURL;page.pathname=new URL(subscribedURL).pathname;callbacks.detect();
-await new Promise(resolve=>setImmediate(resolve));
-assert.equal(requests.length,1,'切换博主复用已加载的列表');
-assert.equal(subscriptionLabel.textContent,'未订阅','切换到未订阅博主不能保留旧状态');
-toggleSender.click();toggleSender.click();
-assert.equal(requests.length,2,'重新打开面板时刷新订阅列表');
-requests[1].onload({status:401,responseText:JSON.stringify({detail:'密钥错误'})});
-await new Promise(resolve=>setImmediate(resolve));
-assert.ok(elements.some(el=>el.textContent==='密钥错误'),'认证失败保留网站提示');
-callbacks.detect();callbacks.detect();
-assert.equal(requests.length,2,'认证失败后不能反复自动请求');
-subscriptionButton.click();
-assert.equal(requests.length,3,'用户点击订阅时可重新尝试');
-assert.equal(requests[2].timeout,15000);
-page.href=authorB;page.pathname=new URL(authorB).pathname;callbacks.detect();
-requests[2].onload({status:200,responseText:JSON.stringify([{id:'b',url:authorB,enabled:true}])});
-await new Promise(resolve=>setImmediate(resolve));
-assert.equal(requests.length,3,'重试期间切换作者不得替新作者提交订阅');
-assert.equal(subscriptionButton.textContent,'♥');
-toggleSender.click();toggleSender.click();
-assert.equal(requests.length,4);
-toggleSender.click();toggleSender.click();
-requests[3].onload({status:200,responseText:'[]'});
-await new Promise(resolve=>setImmediate(resolve));
-assert.equal(requests.length,5,'重新打开面板后忽略旧请求并重新读取');
-requests[4].onload({status:200,responseText:JSON.stringify([{id:'b',url:authorB,enabled:true}])});
-await new Promise(resolve=>setImmediate(resolve));
-assert.equal(subscriptionButton.textContent,'♥','旧响应不能覆盖重新打开后的状态');
-elements.find(el=>el.textContent==='下载博主全部作品').click();
-assert.equal(requests.length,6);
-assert.equal(requests[5].timeout,20000,'慢速提交保留原有等待时间');
-requests[5].onload({status:200,responseText:JSON.stringify({id:'123'})});
-assert.ok(elements.some(el=>el.textContent==='网站已收到任务 #123。下载进度请到网站查看。'),'收到任务不等于下载完成');
-elements.find(el=>el.textContent==='下载博主全部作品').click();
-assert.equal(requests.filter(request=>request.url.endsWith('/api/tasks')).length,1,'同一网站仍阻止重复发送');
-toggleSender.click();toggleSender.click();
-requests.at(-1).onerror();
-await new Promise(resolve=>setImmediate(resolve));
-const frequency=elements.find(el=>el.tag==='select'&&el.children.some(child=>child.value==='weekly'));
-frequency.value='weekly';subscriptionButton.click();
-requests.at(-1).onload({status:200,responseText:'[]'});
-await new Promise(resolve=>setImmediate(resolve));
-assert.equal(JSON.parse(requests.at(-1).data).frequency,'weekly','查询失败后重试应保留用户选择的周期');
-frequency.selectedOptions=[{textContent:'每7天更新'}];
-requests.at(-1).onload({status:200,responseText:JSON.stringify({id:'b',url:authorB,enabled:true,interval_minutes:10080})});
-await new Promise(resolve=>setImmediate(resolve));
-const serverInput=elements.find(el=>el.type==='url'), settingsForm=elements.find(el=>el.tag==='form');
-const authorButton=elements.find(el=>el.textContent==='下载博主全部作品');
-serverInput.value='https://other.example';settingsForm.submit();
-authorButton.click();
-assert.equal(requests.filter(request=>request.url.endsWith('/api/tasks')).length,2,'切换网站后同一博主仍可发送');
-assert.equal(requests.at(-1).url,'https://other.example/api/tasks');
-serverInput.value='https://third.example';settingsForm.submit();
-const status=elements.find(el=>el.className==='status');
-const statusAfterSwitch=status.textContent;
-requests.at(-1).onload({status:200,responseText:JSON.stringify({id:'456'})});
-assert.equal(status.textContent,statusAfterSwitch,'旧网站的成功回调不能冒充当前网站的任务');
-authorButton.click();
-assert.equal(requests.filter(request=>request.url.endsWith('/api/tasks')).length,3,'旧网站请求完成后不能拦截新网站');
-assert.equal(requests.at(-1).url,'https://third.example/api/tasks');
-page.href=subscribedURL;page.pathname=new URL(subscribedURL).pathname;callbacks.detect();
-requests.at(-1).onload({status:200,responseText:JSON.stringify({id:'789'})});
-assert.equal(status.textContent,'','切换博主后旧任务成功不能显示为当前博主的任务');
-console.log('PASS: 作品/作者识别、订阅请求复用与失败重试、媒体凭据边界、视图暂停、图集边界');
+const authorA={id:'a',url:subscribedURL,name:'甲博主',enabled:true,interval_minutes:129600,next_check:1793448000};
+const knownB={id:'b',url:authorB,name:'乙博主',enabled:true,interval_minutes:10080,next_check:1793534400};
+const request=(b,method,path)=>b.requests.findLast(r=>r.method===method&&new URL(r.url).pathname===path);
+const body=r=>JSON.parse(r.data);
+const activate=b=>b.find('Cloudrift · 下载到媒体库','title').click();
+const select=(b,value)=>{const el=b.elements.find(e=>e.getAttribute('aria-label')==='博主更新周期');el.value=value;el.dispatch('change');return el};
+
+const home=browser('https://www.douyin.com/jingxuan');
+assert.equal(home.host.hidden,true,'首页网格无作品详情时隐藏入口');
+home.go(subscribedURL);
+assert.equal(home.host.hidden,false,'博主页显示入口');
+assert.equal(home.byClass('creator').textContent,'甲博主','博主页显示真实名字');
+activate(home);
+assert.equal(home.requests.length,2,'打开面板并行读取博主和任务');
+assert.ok(request(home,'GET','/api/authors'));
+assert.ok(request(home,'GET','/api/tasks'));
+home.go(authorB);
+home.respond(request(home,'GET','/api/authors'),[authorA,knownB]);
+home.respond(request(home,'GET','/api/tasks'),[
+  {kind:'author',status:'completed',author_id:'a',updated_at:'2025-01-02T03:04:05Z'},
+  {kind:'author',status:'completed',link:authorB,updated_at:'2026-05-06T07:08:09Z'}
+]);
+await tick();
+assert.equal(home.requests.length,2,'切作者复用在途读取');
+assert.equal(home.byClass('creator').textContent,'乙博主','旧请求返回后仍显示当前博主');
+assert.match(home.byClass('last-success').textContent,/2026/,'最后成功时间匹配当前博主');
+assert.doesNotMatch(home.byClass('last-success').textContent,/2025/,'旧博主完成时间不得污染当前状态');
+assert.ok(home.byClass('next-check').textContent,'显示下次检查信息');
+assert.equal(home.find('查看归档 ↗').href,'http://nas.example:8090/#tasks');
+assert.deepEqual(home.elements.find(e=>e.getAttribute('aria-label')==='博主更新周期').children.map(e=>e.value),
+  ['once','three_days','weekly','monthly','quarterly','yearly']);
+home.page.href=subscribedURL;
+home.callbacks['document:click']();home.callbacks.popstate();
+assert.equal(home.frame.length,1,'连续事件合并为一帧检测');
+home.frame.shift()();
+assert.equal(home.byClass('creator').textContent,'甲博主','事件驱动更新当前博主');
+home.page.href=authorB;
+home.callbacks.mutation([{target:{matches:()=>true},addedNodes:[],removedNodes:[]}]);
+assert.equal(home.frame.length,1,'相关页面变化安排检测');
+home.frame.shift()();
+assert.equal(home.byClass('creator').textContent,'乙博主','页面变化后更新当前博主');
+
+const retry=browser();
+activate(retry);
+request(retry,'GET','/api/authors').onerror();
+retry.respond(request(retry,'GET','/api/tasks'),[]);
+await tick();
+retry.callbacks.detect();retry.callbacks.detect();retry.callbacks.detect();
+await tick();
+assert.equal(retry.requests.filter(r=>r.method==='GET'&&r.url.endsWith('/api/authors')).length,1,'失败后不自动反复请求');
+retry.byClass('refresh-state').click();
+assert.equal(retry.requests.filter(r=>r.method==='GET'&&r.url.endsWith('/api/authors')).length,2,'失败后手动刷新');
+retry.respond(request(retry,'GET','/api/authors'),[authorA]);
+const retryTasks=request(retry,'GET','/api/tasks');
+if(retry.requests.filter(r=>r.method==='GET'&&r.url.endsWith('/api/tasks')).length>1)retry.respond(retryTasks,[]);
+await tick();
+
+const once=browser();
+activate(once);
+select(once,'once');
+once.respond(request(once,'GET','/api/authors'),[authorA]);
+once.respond(request(once,'GET','/api/tasks'),[]);
+await tick();
+assert.equal(once.elements.find(e=>e.getAttribute('aria-label')==='博主更新周期').value,'once','载入结果不能覆盖用户已选择的周期');
+const onceButton=once.byClass('submit-plan');
+assert.equal(onceButton.textContent,'下载博主一次');
+onceButton.click();
+await tick();
+const oncePatch=request(once,'PATCH','/api/authors/a');
+assert.equal(body(oncePatch).frequency,'once');
+assert.equal(request(once,'POST','/api/authors/a/check'),undefined,'保存周期成功前不能提交检查');
+once.respond(oncePatch,{...authorA,enabled:false});
+await tick();
+once.respond(request(once,'POST','/api/authors/a/check'),{id:'task-a'});
+await tick();
+assert.equal(onceButton.dataset.state,'submitted');
+assert.equal(onceButton.textContent,'已提交');
+once.go(authorB);
+assert.notEqual(onceButton.dataset.state,'submitted','切作者清除提交状态');
+
+const scheduled=browser(authorB);
+activate(scheduled);
+scheduled.respond(request(scheduled,'GET','/api/authors'),[]);
+scheduled.respond(request(scheduled,'GET','/api/tasks'),[]);
+await tick();
+select(scheduled,'weekly');
+const plan=scheduled.byClass('submit-plan');
+assert.equal(plan.textContent,'下载博主并订阅');
+plan.click();
+await tick();
+const create=request(scheduled,'POST','/api/authors');
+assert.equal(body(create).url,authorB);
+assert.equal(body(create).name,'乙博主');
+assert.equal(body(create).frequency,'weekly');
+assert.equal(request(scheduled,'POST','/api/authors/b/check'),undefined);
+scheduled.respond(create,knownB);
+await tick();
+const check=request(scheduled,'POST','/api/authors/b/check');
+assert.ok(check,'创建成功后提交检查');
+check.onerror();
+await tick();
+assert.notEqual(plan.dataset.state,'submitted','检查失败不能把部分成功显示为已提交');
+
+const moving=browser();
+activate(moving);
+moving.respond(request(moving,'GET','/api/authors'),[authorA]);
+moving.respond(request(moving,'GET','/api/tasks'),[]);
+await tick();
+select(moving,'weekly');
+const movingPlan=moving.byClass('submit-plan');
+movingPlan.click();
+await tick();
+const oldPatch=request(moving,'PATCH','/api/authors/a');
+const movingServer=moving.elements.find(el=>el.type==='url');
+movingServer.value='https://new.example';moving.elements.find(el=>el.tag==='form').submit();
+moving.respond(oldPatch,authorA);
+await tick();
+const oldCheck=request(moving,'POST','/api/authors/a/check');
+assert.equal(new URL(oldCheck.url).origin,'http://nas.example:8090','处理中切换网站不会把检查发送到新网站');
+moving.respond(oldCheck,{id:'old-task'});
+await tick();
+assert.notEqual(movingPlan.dataset.state,'submitted','旧网站的结果不能显示为新网站已提交');
+
+const direct=browser(authorB);
+activate(direct);
+direct.respond(request(direct,'GET','/api/authors'),[knownB]);
+direct.respond(request(direct,'GET','/api/tasks'),[]);
+await tick();
+direct.find('立即更新博主').click();
+assert.ok(request(direct,'POST','/api/authors/b/check'),'已登记博主直接提交检查，不改订阅');
+assert.equal(request(direct,'PATCH','/api/authors/b'),undefined);
+direct.respond(request(direct,'POST','/api/authors/b/check'),{id:'task-b'});
+await tick();
+assert.equal(direct.byClass('creator-status').dataset.state,'submitted','提交反馈不等待状态刷新');
+const refreshed=request(direct,'GET','/api/authors');
+assert.equal(direct.requests.filter(r=>r.method==='GET'&&r.url.endsWith('/api/authors')).length,2,'提交后重新获取下次检查时间');
+direct.respond(refreshed,[{...knownB,next_check:1924992000}]);
+await tick();
+assert.match(direct.byClass('next-check').textContent,/2031/,'显示网站重新安排的检查时间');
+direct.byClass('refresh-state').click();
+direct.respond(request(direct,'GET','/api/authors'),[knownB]);
+direct.respond(request(direct,'GET','/api/tasks'),[]);
+await tick();
+direct.find('立即更新博主').click();
+assert.equal(direct.requests.filter(r=>r.method==='POST'&&r.url.endsWith('/api/authors/b/check')).length,2,'手动刷新后可再次提交');
+direct.respond(request(direct,'POST','/api/authors/b/check'),{id:'task-b2'});
+await tick();
+const serverInput=direct.elements.find(el=>el.type==='url'), form=direct.elements.find(el=>el.tag==='form');
+serverInput.value='https://other.example';form.submit();
+direct.find('立即更新博主').click();
+direct.respond(request(direct,'GET','/api/authors'),[knownB]);
+direct.respond(request(direct,'GET','/api/tasks'),[]);
+await tick();
+const directOther=direct.requests.findLast(r=>r.method==='POST'&&r.url.startsWith('https://other.example'));
+assert.ok(directOther,'切换网站后同一博主仍可提交');
+
+const changedToken=browser();
+activate(changedToken);
+changedToken.respond(request(changedToken,'GET','/api/authors'),[authorA]);
+changedToken.respond(request(changedToken,'GET','/api/tasks'),[]);
+await tick();
+changedToken.find('立即更新博主').click();
+const oldTokenCheck=request(changedToken,'POST','/api/authors/a/check');
+changedToken.elements.find(el=>el.type==='password').value='new-test-token';
+changedToken.elements.find(el=>el.tag==='form').submit();
+changedToken.respond(oldTokenCheck,{id:'old-token-task'});
+await tick();
+assert.notEqual(changedToken.byClass('creator-status').dataset.state,'submitted','同网站更换密钥后旧响应不能显示提交成功');
+assert.doesNotMatch(changedToken.byClass('status').textContent,/已提交/);
+
+const staleState=browser();
+activate(staleState);
+staleState.respond(request(staleState,'GET','/api/authors'),[authorA]);
+staleState.respond(request(staleState,'GET','/api/tasks'),[]);
+await tick();
+staleState.byClass('refresh-state').click();
+const oldAuthors=request(staleState,'GET','/api/authors'),oldTasks=request(staleState,'GET','/api/tasks');
+staleState.find('立即更新博主').click();
+staleState.respond(request(staleState,'POST','/api/authors/a/check'),{id:'new-task'});
+await tick();
+staleState.respond(request(staleState,'GET','/api/authors'),[{...authorA,next_check:1924992000}]);
+await tick();
+staleState.respond(oldAuthors,[authorA]);staleState.respond(oldTasks,[]);
+await tick();
+assert.match(staleState.byClass('next-check').textContent,/2031/,'较早的状态请求不能覆盖提交后的新计划');
+
+const missingAuthor=browser();
+activate(missingAuthor);
+missingAuthor.respond(request(missingAuthor,'GET','/api/authors'),[]);
+missingAuthor.respond(request(missingAuthor,'GET','/api/tasks'),[{kind:'author',status:'completed',link:'https://v.douyin.com/short/',updated_at:'2024-01-02T03:04:05Z'}]);
+await tick();
+missingAuthor.go(`https://www.douyin.com/video/${sample}`);
+assert.equal(missingAuthor.byClass('last-success').textContent,'暂无记录','未识别作者时不能把短链接任务当作当前作者');
+
+const unknown=browser(authorB);
+activate(unknown);
+unknown.respond(request(unknown,'GET','/api/authors'),[]);
+unknown.respond(request(unknown,'GET','/api/tasks'),[]);
+await tick();
+unknown.find('立即更新博主').click();
+const authorTask=request(unknown,'POST','/api/tasks');
+assert.equal(body(authorTask).kind,'author');
+assert.equal(body(authorTask).link,authorB);
+assert.equal(request(unknown,'POST','/api/authors'),undefined,'直接更新不改变订阅');
+
+const detail=browser(`https://www.douyin.com/video/${sample}`);
+activate(detail);
+detail.find('下载当前作品').click();
+const detailTask=request(detail,'POST','/api/tasks');
+assert.equal(body(detailTask).kind,'detail');
+assert.equal(body(detailTask).link,`https://www.douyin.com/video/${sample}`);
+console.log('PASS: 作品/作者识别、订阅与提交反馈、媒体凭据边界、视图暂停、图集边界');
