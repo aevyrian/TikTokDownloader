@@ -24,7 +24,7 @@
   if (typeof module !== 'undefined' && module.exports) { module.exports = { mediaURL, switchView, moveGallery, isVideoFile, authorInitial, keyError, taskTitle, playVisible, applySound, releasePlayback, preloadVideos }; return; }
   const $ = id => document.getElementById(id);
   if (location.protocol === 'file:') { $('connect-form').hidden = true; $('local-preview').hidden = false; return; }
-  const state = { token: localStorage.getItem('library_access_key') || '', muted:true, favoriteKind:'works', auth: null, view: 'library', items: [], total: 0, generation: 0, authorsGeneration: 0, navigation: 0, busy: false };
+  const state = { token: localStorage.getItem('library_access_key') || '', muted:false, favoriteKind:'works', auth: null, view: 'library', items: [], total: 0, generation: 0, authorsGeneration: 0, navigation: 0, busy: false };
   const frequencies={once:'不订阅',three_days:'每3天更新',weekly:'每7天更新',monthly:'每月更新',quarterly:'每季度更新',yearly:'每年更新'};
   const frequencyValues={1440:'three_days',4320:'three_days',10080:'weekly',43200:'monthly',129600:'quarterly',525600:'yearly'};
   const statusNames = { queued: '已排队', paused:'已暂停', parsing: '正在解析', awaiting_confirmation: '等待画质确认', downloading: '正在下载', completed: '完整保存', failed: '失败', interrupted: '已中断', cancelled: '已取消' };
@@ -147,9 +147,10 @@
     const selected=card?cards.indexOf(card):-1;
     if(card!==activeCard){clearTimeout(warmTimer);activeCard=card;}
     cards.forEach((item,i)=>{const v=item.querySelector('video');if(!v)return;
+      if(i!==selected)v.autoAdvancePending=false;
       if(!enabled){v.playbackWarm=false;v.cancelPreparation?.();playVisible(v,false);}
       else if(i<selected-1||i>selected+2)releasePlayback(v);
-      else {v.playbackWarm=v.playbackWarm&&i>selected;if(i!==selected||!v.playbackActive||!v.playbackReady)playVisible(v,i===selected);}
+      else {v.playbackWarm=v.playbackWarm&&i>selected;if(i!==selected||!v.playbackActive||!v.playbackReady)playVisible(v,i===selected);if(i===selected&&v.autoAdvancePending)v.advancePlayback?.();}
     });
     clearTimeout(warmTimer);
     if(card&&(!card.querySelector('video')||card.querySelector('video').playbackReady))warmTimer=setTimeout(()=>{
@@ -172,14 +173,31 @@
     const files = Array.isArray(work.files) ? work.files : [];
     if (!files.length) { empty(card, '媒体文件不可用', '请到下载任务查看原因并重试。'); return card; }
     const gallery = !['视频', 'video'].includes(work.type) && (files.length > 1 || !isVideoFile(files[0]));
-    let media;
+    let media,advancing=false;
+    function currentVideo(video){
+      const feed=$('feed'),cards=[...feed.querySelectorAll('.work')];
+      const visible=document.fullscreenElement?.closest('.work')||cards[Math.round(feed.scrollTop/feed.clientHeight)];
+      return card.isConnected&&media===video&&activeCard===card&&visible===card&&!document.hidden&&!feed.hidden&&['library','favorites'].includes(state.view)&&video.playbackActive&&!video.userPaused&&video.ended;
+    }
+    async function nextWork(video=null){
+      if(video&&(advancing||!currentVideo(video))){if(!advancing)video.autoAdvancePending=false;return;}
+      if(video&&!card.nextElementSibling&&state.loadingLibrary)return;
+      if(video)advancing=true;
+      try{
+        if(!card.nextElementSibling&&state.hasMore)await loadLibrary();
+        if(video&&!currentVideo(video))return;
+        const next=card.nextElementSibling;
+        if(video&&next&&document.fullscreenElement?.closest('.work')===card){const previous=fullscreenCard;fullscreenCard=null;try{await document.exitFullscreen();}catch(error){if(document.fullscreenElement?.closest('.work')===card)fullscreenCard=previous;throw error;}if(!currentVideo(video))return;}
+        next?.scrollIntoView({behavior:'smooth',block:'start'});
+      }finally{if(video){video.autoAdvancePending=false;advancing=false;}}
+    }
     function showMedia(index) {
       if(media?.tagName==='VIDEO')releasePlayback(media);media?.remove();
       card.querySelector('.player-controls')?.remove();
       card.querySelector('.playback-state')?.remove();
       media = element(isVideoFile(files[index]) ? 'video' : 'img', 'work-media');
       if (media.tagName === 'VIDEO') {
-        media.controls = false; media.playsInline = true; media.preload = 'none'; media.loop = true;media.muted=state.muted;
+        media.controls = false; media.playsInline = true; media.preload = 'none'; media.loop = gallery || work.type==='实况';media.muted=state.muted;
         const current=media, message=element('div','playback-state');message.setAttribute('role','status');
         let checking=false,poll=0,started=0;
         current.cancelPreparation=()=>{clearTimeout(poll);message.remove();};
@@ -228,6 +246,8 @@
         current.addEventListener('error',fallback);
         current.addEventListener('loadeddata',()=>{if(!current.videoWidth)fallback();});
         current.addEventListener('playing',()=>{message.remove();schedulePlayback();});
+        current.advancePlayback=()=>{if(current.autoAdvancePending)nextWork(current).catch(error=>notice(error.message,true));};
+        current.addEventListener('ended',()=>{if(!current.loop){current.autoAdvancePending=true;current.advancePlayback();}});
       } else { media.alt = work.description || '作品图集'; media.loading = position === 0 || index > 0 ? 'eager' : 'lazy'; }
       if(media.tagName!=='VIDEO'){
         media.addEventListener('error', () => { notice('图片无法打开，请检查原文件是否仍存在。', true); });
@@ -259,7 +279,7 @@
     const original = element('a', 'work-tool', '↗'); original.href = `https://www.douyin.com/${work.type === '视频' ? 'video' : 'note'}/${work.id}`; original.target = '_blank'; original.rel = 'noopener noreferrer'; original.setAttribute('aria-label', '打开抖音原作'); original.title = '原作';
     original.hidden = work.source === 'legacy';
     const up = action('⌃', () => card.previousElementSibling?.scrollIntoView({ behavior: 'smooth', block: 'start' })); up.className = 'work-tool'; up.setAttribute('aria-label', '上一条作品');
-    const down = action('⌄', async () => { if (!card.nextElementSibling && state.hasMore) await loadLibrary(); card.nextElementSibling?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }); down.className = 'work-tool'; down.setAttribute('aria-label', '下一条作品');
+    const down = action('⌄', () => nextWork()); down.className = 'work-tool'; down.setAttribute('aria-label', '下一条作品');
     const favorite=action('',async()=>{const value=!work.favorite;await api(`/api/favorites/${encodeURIComponent(work.id)}`,'PUT',{favorite:value});work.favorite=value;paintFavorite();if(state.view==='favorites'&&!value){card.querySelector('video')?.pause();feedObserver.unobserve(card);card.remove();state.items=state.items.filter(w=>w.id!==work.id);state.total--;if(!state.items.length)await loadLibrary(true);}});favorite.className='work-tool favorite-tool';
     function paintFavorite(){favorite.textContent=work.favorite?'♥':'♡';favorite.setAttribute('aria-label',work.favorite?'取消收藏作品':'收藏作品');favorite.setAttribute('aria-pressed',String(Boolean(work.favorite)));}paintFavorite();
     tools.append(avatar, favorite, original, up, down); card.append(tools);
@@ -289,7 +309,7 @@
       $('library-label').textContent=author?`@${$('search-author').selectedOptions[0].textContent.replace(/^@+/,'')}`:state.view==='favorites'?'我的收藏':$('search-query').value.trim()?'搜索结果':'随机推荐';
       $('back-recommendations').hidden=!author;$('shuffle-library').hidden=Boolean(author)||state.view==='favorites';
       $('clear-search').hidden = !$('search-query').value && !$('search-author').value;
-    } finally { if(generation===state.generation)state.loadingLibrary = false; }
+    } finally { if(generation===state.generation){state.loadingLibrary = false;schedulePlayback();} }
   }
   function taskCard(task) {
     const card = element('article', 'record'); const content = element('div', 'record-content'); const heading = element('div', 'record-title');

@@ -7,15 +7,15 @@ const { switchView, applySound } = createRequire(import.meta.url)('../app/static
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const stateContext = vm.createContext({ localStorage: { getItem: key => key === 'library_muted' ? 'false' : '' } });
 vm.runInContext(source.slice(source.indexOf('  const state ='), source.indexOf('  const statusNames =')) + '\nglobalThis.state = state;', stateContext);
-assert.equal(stateContext.state.muted, true, '刷新作品库默认静音，不沿用旧的开声音偏好');
+assert.equal(stateContext.state.muted, false, '刷新作品库默认打开声音');
 const html = readFileSync(new URL('../app/static/index.html', import.meta.url), 'utf8');
-assert.match(html, /id="sound-toggle"[^>]*aria-pressed="false">声音：关<\/button>/, '初始声音按钮应显示静音');
+assert.match(html, /id="sound-toggle"[^>]*aria-pressed="true">声音：开<\/button>/, '初始声音按钮应显示声音开启');
 const button = { events: {}, setAttribute() {}, addEventListener(type, callback) { this.events[type] = callback; } };
 const videos = [{ muted: true }];
 const soundContext = vm.createContext({ state: stateContext.state, $: id => id === 'sound-toggle' ? button : { querySelectorAll: () => videos }, localStorage: { setItem() {} }, applySound, activeCard: null });
 vm.runInContext(source.slice(source.indexOf('  function paintSound()'), source.indexOf("  $('refresh-tasks')")), soundContext);
-button.events.click(); assert.equal(videos[0].muted, false, '用户可以手动打开声音');
-button.events.click(); assert.equal(videos[0].muted, true, '用户可以再次关闭声音');
+button.events.click(); assert.equal(videos[0].muted, true, '用户可以手动关闭声音');
+button.events.click(); assert.equal(videos[0].muted, false, '用户可以再次打开声音');
 
 const ids = Object.fromEntries(['cookie-state', 'cookie', 'clear-cookie', 'quality-policy', 'download-dir', 'download-dir-hint', 'script-server', 'script-token', 'reveal-token'].map(id => [id, {}]));
 let resolveStatus; let statusPainted = false; let legacyLoaded = false;
@@ -97,4 +97,4 @@ await navigationContext.navigate('settings');
 assert.equal(panels.find(panel => panel.id === 'view-settings').hidden, false, '慢任务请求不应阻止立即切到设置');
 rejectOld(new Error('旧任务请求失败')); await oldNavigation;
 assert.equal(notices.includes('旧任务请求失败'), false, '旧页面错误不应弹到新页面');
-console.log('Navigation checks passed: immediate switching, stale responses, independent settings, and default mute.');
+console.log('Navigation checks passed: immediate switching, stale responses, independent settings, and sound on by default.');
