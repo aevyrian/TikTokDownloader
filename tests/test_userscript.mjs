@@ -16,15 +16,20 @@ assert.equal(defaultKind(undefined),'author','首次默认下载博主全部作�
 assert.equal(defaultKind('weekly'),'author','不从旧值启用订阅或不明模式');
 assert.equal(defaultKind('detail'),'detail','默认按钮可在设置中改为当前作品');
 let placement=senderPosition({left:1200,top:300,width:50},{width:1600,height:900},380);
-assert.equal(placement.left,1207,'入口与操作栏中心对齐');
-assert.equal(placement.top,252,'入口位于操作栏上方');
+assert.equal(placement.left+22,1225,'方形下载入口与操作栏中心对齐');
+assert.equal(placement.top+44+12,300,'入口与下方操作栏保持12px间距');
 assert.ok(placement.panelLeft+placement.panelWidth<placement.left,'面板向左展开');
 assert.ok(placement.panelTop>=12 && placement.panelTop+380<=888);
 placement=senderPosition({left:18,top:50,width:42},{width:390,height:640},600);
 assert.ok(placement.panelLeft>=12 && placement.panelLeft+placement.panelWidth<=378,'窄窗口面板不溢出');
 assert.ok(placement.top>=12 && placement.panelTop>=12 && placement.panelTop+600<=628);
 placement=senderPosition(null,{width:390,height:640},350);
-assert.ok(placement.left>=12 && placement.left+36<=378,'没有操作栏的博主页保留入口');
+assert.ok(placement.left>=12 && placement.left+44<=378,'没有操作栏的博主页保留方形入口');
+for(const viewport of [{width:320,height:568},{width:390,height:844},{width:1440,height:900}]){
+  const position=senderPosition({left:viewport.width-70,top:80,width:44},viewport,430);
+  assert.ok(position.left>=12&&position.left+44<=viewport.width-12,'下载按钮不能超出屏幕');
+  assert.ok(position.panelLeft>=12&&position.panelLeft+position.panelWidth<=viewport.width-12,'加宽后的面板不能超出屏幕');
+}
 const panel = { hidden: true }, attributes = {};
 const toggle = { setAttribute(name, value) { attributes[name] = value; } };
 togglePanel(panel, toggle);
@@ -131,17 +136,21 @@ runInNewContext(readFileSync(script,'utf8'),{URL,document:doc,location:page,inne
   setInterval(fn){callbacks.detect=fn},setTimeout(){},clearTimeout(){}});
 const toggleSender=elements.find(el=>el.title==='Cloudrift · 下载到媒体库');
 const subscriptionButton=elements.find(el=>el.className==='subscribe');
+const subscriptionLabel=elements.find(el=>el.className==='subscription-state');
 const authorB='https://www.douyin.com/user/MS4wLjABAAAA_someone_else';
 toggleSender.click();
 assert.equal(requests.length,1,'打开面板只请求一次订阅列表');
+assert.equal(subscriptionLabel.textContent,'核对中…','核对完成前不显示已订阅');
 page.href=authorB;page.pathname=new URL(authorB).pathname;callbacks.detect();
 requests[0].onload({status:200,responseText:JSON.stringify([{id:'b',url:authorB,enabled:true}])});
 await new Promise(resolve=>setImmediate(resolve));
 assert.equal(requests.length,1,'切换博主应复用在途列表请求');
 assert.equal(subscriptionButton.textContent,'♥','在途请求完成后立即显示当前博主状态');
+assert.equal(subscriptionLabel.textContent,'追更已开启','订阅分区显示当前博主的实际状态');
 page.href=subscribedURL;page.pathname=new URL(subscribedURL).pathname;callbacks.detect();
 await new Promise(resolve=>setImmediate(resolve));
 assert.equal(requests.length,1,'切换博主复用已加载的列表');
+assert.equal(subscriptionLabel.textContent,'未订阅','切换到未订阅博主不能保留旧状态');
 toggleSender.click();toggleSender.click();
 assert.equal(requests.length,2,'重新打开面板时刷新订阅列表');
 requests[1].onload({status:401,responseText:JSON.stringify({detail:'密钥错误'})});

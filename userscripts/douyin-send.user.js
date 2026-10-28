@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cloudrift Sender
 // @namespace    douyin-local-library
-// @version      1.6.2
+// @version      1.7.0
 // @description  一键下载作品或博主，按日、周、月订阅更新并同步网站收藏状态。
 // @match        https://www.douyin.com/*
 // @match        https://douyin.com/*
@@ -61,11 +61,11 @@
   }
   function senderPosition(anchor, viewport, panelHeight) {
     const clamp = (value, low, high) => Math.max(low, Math.min(value, high));
-    const left = clamp(anchor ? anchor.left + (anchor.width - 36) / 2 : viewport.width - 56, 12, viewport.width - 48);
-    const top = clamp(anchor ? anchor.top - 48 : 150, 12, viewport.height - 48);
-    const panelWidth = Math.min(260, viewport.width - 24);
+    const left = clamp(anchor ? anchor.left + (anchor.width - 44) / 2 : viewport.width - 64, 12, viewport.width - 56);
+    const top = clamp(anchor ? anchor.top - 56 : 150, 12, viewport.height - 56);
+    const panelWidth = Math.min(304, viewport.width - 24);
     return {left, top, panelWidth,
-      panelLeft: clamp(left >= panelWidth + 24 ? left - panelWidth - 12 : left + 48, 12, viewport.width - panelWidth - 12),
+      panelLeft: clamp(left >= panelWidth + 24 ? left - panelWidth - 12 : left + 56, 12, viewport.width - panelWidth - 12),
       panelTop: clamp(top, 12, viewport.height - panelHeight - 12)};
   }
   function subscriptionState(authors,url) { const author=authors.find(a=>resolveTargets(a.url).author===url)||null;return {author,enabled:Boolean(author?.enabled),frequency:({4320:'three_days',10080:'weekly',43200:'monthly',129600:'quarterly',525600:'yearly'}[author?.interval_minutes]||'quarterly')}; }
@@ -73,24 +73,47 @@
 
   const host = document.createElement('div');
   host.id = 'douyin-library-sender';
-  host.style.cssText = 'position:fixed;width:36px;height:36px;z-index:2147483647';
+  host.style.cssText = 'position:fixed;width:44px;height:44px;z-index:2147483647';
   const shadow = host.attachShadow({ mode: 'closed' });
   const style = document.createElement('style');
-  style.textContent = ':host{font:13px/1.5 system-ui;color:#eeeef0}*{box-sizing:border-box}section{position:fixed;padding:14px;border:1px solid #ffffff10;border-radius:12px;background:#25262be8;backdrop-filter:blur(24px);box-shadow:0 8px 28px #0004;max-height:calc(100vh - 24px);overflow:auto}section[hidden],[hidden],.settings-open .downloads{display:none!important}header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}header strong{font-size:12px;font-weight:500;color:#a9a9b1;letter-spacing:.3px}button{border:0;border-radius:7px;padding:9px 10px;background:#ffffff08;color:inherit;cursor:pointer;font:inherit;text-align:left}button:hover{background:#ffffff13}button:disabled{opacity:.4;cursor:default}button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid #c7cad5;outline-offset:3px}.actions{display:grid;gap:4px;margin:12px 0 9px}.actions button{display:flex;align-items:center;min-height:38px}.actions button:before{content:"↓";font-size:18px;margin-right:10px;color:#b4b4bc}.actions .primary:before{color:#ff5077}.actions .primary{background:#ffffff0d}.close{padding:0;width:20px;height:20px;line-height:20px;text-align:center;background:transparent;font-size:19px;color:#93939d}.toggle{width:36px;height:36px;padding:0;text-align:center;border-radius:50%;background:#ffffff05;border:1px solid #ffffff14;color:#ffffff70;font-size:18px;line-height:1;transition:color .15s,background .15s}.toggle:hover,.toggle[aria-expanded=true],.toggle:focus-visible{color:#eee;background:#ffffff12}.creator{display:block;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.author-link{display:inline-block;margin-top:3px;font-size:11px;color:#94949f}p{font-size:11px;color:#93939e;margin:6px 0;overflow-wrap:anywhere}a{color:#b2b2bd;text-decoration:none}a:hover{color:#fff}.footer{display:flex;align-items:center;justify-content:space-between;margin-top:10px;padding-top:9px;border-top:1px solid #ffffff0c;font-size:11px}.footer small{font-size:10px;color:#71717d}details{margin-top:12px}summary{cursor:pointer;color:#a5a5b0;font-size:11px;list-style:none}summary::-webkit-details-marker{display:none}summary:hover{color:#eee}label{display:block;margin:10px 0 5px;color:#b8b8c2;font-size:11px}input,select{display:block;width:100%;margin-top:5px;border:1px solid #ffffff14;background:#ffffff06;color:inherit;border-radius:6px;padding:7px;font:inherit;outline:none}input:focus,select:focus{border-color:#ffffff50}select option{background:#25262b}form button{width:100%;margin-top:12px;text-align:center;background:#ffffff12}.status{color:#c8c8d0;font-size:11px}.status:empty{display:none}';
+  style.textContent = `
+:host{font:13px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;color:#f0f0f3;color-scheme:dark}*{box-sizing:border-box}
+section{position:fixed;padding:18px;border:1px solid #ffffff1c;border-radius:16px;background:#24252bf5;backdrop-filter:blur(24px);box-shadow:0 16px 48px #0005;max-height:calc(100dvh - 24px);overflow:auto;scrollbar-width:thin}
+section[hidden],[hidden],.settings-open .downloads{display:none!important}
+header{display:flex;align-items:center;justify-content:space-between;padding-bottom:14px;margin-bottom:16px;border-bottom:1px solid #ffffff10}.brand{display:flex;align-items:baseline;gap:9px}.brand strong{font-size:15px;font-weight:650;letter-spacing:.2px}.brand small{font-size:10px;color:#a7a8b3}
+button{border:1px solid transparent;border-radius:10px;padding:10px 12px;background:#ffffff08;color:inherit;cursor:pointer;font:inherit;text-align:left}button:hover{background:#ffffff10}button:disabled{opacity:.42;cursor:default}button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid #ff7897;outline-offset:3px}
+.close{display:grid;place-items:center;padding:0;width:28px;height:28px;background:transparent;font-size:22px;line-height:1;color:#b6b7c1}
+.toggle{display:grid;place-items:center;width:44px;height:44px;padding:0;border-radius:12px;background:#272830ed;border:1px solid #ffffff26;color:#eeeef2;box-shadow:0 3px 12px #0003;transition:color .15s,background .15s,border-color .15s}.toggle:hover,.toggle:focus-visible{background:#353640;border-color:#ffffff55}.toggle[aria-expanded=true]{color:#ff7897;background:#303039;border-color:#ff789765}.toggle svg{display:block;pointer-events:none}
+.creator-row{min-width:0}.creator{display:block;font-size:17px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.author-link{display:inline-flex;margin-top:3px;align-items:center;min-height:24px;font-size:11px;color:#a8a9b4}
+a{color:#bcbcc7;text-decoration:none}a:hover{color:#fff}.actions{display:grid;gap:8px;margin:14px 0 8px}.actions button{display:flex;align-items:center;min-height:45px;border-color:#ffffff0b;background:#ffffff05;font-size:13px;font-weight:550}.actions button:before{content:"↓";width:24px;margin-right:9px;color:#c6c7d1;font-size:23px;line-height:1}.actions button:hover{background:#ffffff0d}.actions .primary{background:#ff50770d;border-color:#ff50773b}.actions .primary:hover{background:#ff507719}.actions .primary:before{color:#ff6a8c}
+p{font-size:11px;color:#a7a8b3;margin:7px 0;overflow-wrap:anywhere}.followup{padding:12px;margin-top:15px;border:1px solid #ffffff0f;border-radius:11px;background:#ffffff03}.followup-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px;color:#c8c9d2;font-size:11px}.subscription-state{color:#a9aab4}.subscription-state.active{color:#ff8aa4}.followup-controls{display:flex;align-items:center;gap:8px}.followup-controls select{flex:1;min-width:0;width:auto;margin:0}.subscribe{display:grid;place-items:center;flex:none;width:37px;height:35px;padding:0;font-size:23px;line-height:1;color:#c1c2ce;background:#ffffff05;border-color:#ffffff12}.subscribe[aria-pressed=true]{color:#ff7897;border-color:#ff78973b;background:#ff50770b}.subscribe:hover{background:#ffffff10}
+.footer{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:13px;padding-top:12px;border-top:1px solid #ffffff10;font-size:11px}.footer small{font-size:9px;letter-spacing:.5px;color:#9697a3}
+details{margin-top:12px}summary{display:flex;align-items:center;justify-content:space-between;min-height:28px;cursor:pointer;color:#b4b5c0;font-size:11px;list-style:none}summary:after{content:"›";font-size:18px;line-height:1}details[open] summary:after{transform:rotate(90deg)}summary::-webkit-details-marker{display:none}summary:hover{color:#fff}
+label{display:block;margin:12px 0 6px;color:#bfc0cb;font-size:11px}input,select{display:block;width:100%;margin-top:5px;border:1px solid #ffffff1b;background:#ffffff05;color:inherit;border-radius:8px;padding:7px 9px;font:inherit;outline:none}input:focus,select:focus{border-color:#ff789780}select option{background:#272830}form button{width:100%;margin-top:13px;text-align:center;background:#ffffff10}.status{color:#dddde5;font-size:11px}.status:empty{display:none}
+@media(prefers-reduced-motion:reduce){.toggle{transition:none}}
+  `;
   const panel = document.createElement('section'); panel.hidden = true; panel.setAttribute('aria-label', 'Cloudrift 下载面板');
-  const toggle = document.createElement('button'); toggle.textContent = '▷'; toggle.className = 'toggle'; toggle.title = 'Cloudrift · 下载到媒体库';
+  const toggle = document.createElement('button'); toggle.innerHTML = '<svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg>'; toggle.className = 'toggle'; toggle.title = 'Cloudrift · 下载到媒体库';
   toggle.setAttribute('aria-label', '打开媒体库发送菜单'); toggle.setAttribute('aria-expanded', 'false');
   toggle.addEventListener('click', () => { settings.open = false; togglePanel(panel, toggle); if(!panel.hidden){authors=null;subscriptionGeneration++;subscriptionFor='';}detect(); });
   const header = document.createElement('header');
   const title = document.createElement('strong'); title.textContent = 'Cloudrift';
+  const brand = document.createElement('div'); brand.className = 'brand';
+  const subtitle = document.createElement('small'); subtitle.textContent = '下载与归档'; brand.append(title, subtitle);
   const close = document.createElement('button'); close.textContent = '×'; close.className = 'close'; close.setAttribute('aria-label', '收起下载面板');
-  close.addEventListener('click', () => { togglePanel(panel, toggle); toggle.focus(); }); header.append(title, close);
+  close.addEventListener('click', () => { togglePanel(panel, toggle); toggle.focus(); }); header.append(brand, close);
   const creator = document.createElement('strong'); creator.className = 'creator';
   const creatorRow=document.createElement('div');creatorRow.className='creator-row';
   const frequency=document.createElement('select');frequency.setAttribute('aria-label','博主更新周期');
   for(const [value,text] of [['three_days','每3天更新'],['weekly','每7天更新'],['monthly','每月更新'],['quarterly','每季度更新'],['yearly','每年更新']]){const option=document.createElement('option');option.value=value;option.textContent=text;frequency.append(option);}frequency.value='quarterly';
   const subscribe=document.createElement('button');subscribe.className='subscribe';subscribe.textContent='♡';subscribe.setAttribute('aria-label','订阅博主');subscribe.setAttribute('aria-pressed','false');
-  creatorRow.append(creator,frequency,subscribe);
+  creatorRow.append(creator);
+  const followup=document.createElement('div');followup.className='followup';
+  const followupHeading=document.createElement('div');followupHeading.className='followup-heading';
+  const followupLabel=document.createElement('span');followupLabel.textContent='后续追更';
+  const subscriptionLabel=document.createElement('span');subscriptionLabel.className='subscription-state';subscriptionLabel.textContent='待核对';
+  const followupControls=document.createElement('div');followupControls.className='followup-controls';followupControls.append(frequency,subscribe);
+  followupHeading.append(followupLabel,subscriptionLabel);followup.append(followupHeading,followupControls);
   const authorLink = document.createElement('a'); authorLink.className = 'author-link'; authorLink.target = '_blank'; authorLink.rel = 'noopener noreferrer';
   const detailButton = document.createElement('button'); detailButton.textContent = '下载当前作品';
   const authorButton = document.createElement('button'); authorButton.textContent = '下载博主全部作品';
@@ -108,15 +131,14 @@
   preference.value = defaultKind(GM_getValue('library_default_kind', 'author')); field('默认下载内容', preference);
   const save = document.createElement('button'); save.type = 'submit'; save.textContent = '保存设置'; form.append(save); settings.append(summary, form);
   const footer = document.createElement('div'); footer.className = 'footer';
-  const version = document.createElement('small'); version.textContent = 'SENDER 1.6.2';
+  const version = document.createElement('small'); version.textContent = 'SENDER 1.7.0';
   const libraryLink = document.createElement('a'); libraryLink.textContent = '查看任务 ↗'; libraryLink.target = '_blank'; libraryLink.rel = 'noopener noreferrer'; libraryLink.hidden = true;
   const status = document.createElement('p'); status.className = 'status'; status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
-  const downloads = document.createElement('div'); downloads.className = 'downloads'; downloads.append(creatorRow, authorLink, actions, hint);
+  const downloads = document.createElement('div'); downloads.className = 'downloads'; downloads.append(creatorRow, authorLink, actions, hint, followup);
   footer.append(version, libraryLink); panel.append(header, downloads, settings, status, footer); shadow.append(style, panel, toggle); document.body.append(host);
   host.addEventListener('keydown', event => { if (event.key === 'Escape' && !panel.hidden) { togglePanel(panel, toggle); toggle.focus(); } });
   let targets = { detail: null, author: null }, sending = false, anchor = null;
   let subscription=null,subscriptionFor='',subscriptionBusy=false,subscriptionLoaded=false,authors=null,subscriptionGeneration=0;
-  style.textContent+='.creator-row{display:flex;align-items:center;gap:7px}.creator-row .creator{flex:1;min-width:0}.creator-row select{flex:none;width:88px;margin:0;padding:4px 5px;font-size:11px}.subscribe{flex:none;width:25px;padding:0;background:transparent;color:#ffffff80;font-size:23px;line-height:28px;text-align:center}.subscribe[aria-pressed=true]{color:#ff4f78}.subscribe:hover{background:transparent;color:#fff}.subscribe[aria-pressed=true]:hover{color:#ff718e}';
   function subscriptionRequest(method,path,body){return new Promise((resolve,reject)=>{
     let server;try{server=normalizeServer(GM_getValue('library_server',''));}catch{reject(new Error('请先配置网站地址。'));return;}
     GM_xmlhttpRequest({method,url:server+path,timeout:15000,headers:{'Content-Type':'application/json',Authorization:`Bearer ${GM_getValue('library_token','')}`},...(body===undefined?{}:{data:JSON.stringify(body)}),
@@ -125,6 +147,8 @@
   });}
   function paintSubscription(){
     const checked=subscriptionLoaded&&subscriptionFor===targets.author&&Boolean(subscription?.enabled);
+    subscriptionLabel.textContent=!targets.author?'未识别博主':subscriptionBusy?'核对中…':subscriptionLoaded?checked?'追更已开启':'未订阅':'待核对';
+    subscriptionLabel.classList.toggle('active',checked);
     subscribe.textContent=checked?'♥':'♡';subscribe.setAttribute('aria-pressed',String(checked));subscribe.title=checked?'停止追更，保留已有作品':subscriptionLoaded?'按所选周期订阅此博主':subscriptionBusy?'正在核对网站订阅状态':'点击重新核对网站订阅状态';
     subscribe.disabled=subscriptionBusy||!targets.author;frequency.disabled=subscriptionBusy||!targets.author;
   }
