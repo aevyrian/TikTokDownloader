@@ -24,7 +24,7 @@
   if (typeof module !== 'undefined' && module.exports) { module.exports = { mediaURL, switchView, moveGallery, isVideoFile, authorInitial, keyError, taskTitle, playVisible, applySound, releasePlayback, preloadVideos }; return; }
   const $ = id => document.getElementById(id);
   if (location.protocol === 'file:') { $('connect-form').hidden = true; $('local-preview').hidden = false; return; }
-  const state = { token: localStorage.getItem('library_access_key') || '', muted:false, favoriteKind:'works', auth: null, view: 'library', items: [], total: 0, generation: 0, authorsGeneration: 0, navigation: 0, busy: false };
+  const state = { token: localStorage.getItem('library_access_key') || '', muted:false, favoriteKind:'works', auth: null, view: 'library', items: [], total: 0, generation: 0, authorsGeneration: 0, navigation: 0, busy: false, cookieSyncGeneration:0 };
   const frequencies={once:'不订阅',three_days:'每3天更新',weekly:'每7天更新',monthly:'每月更新',quarterly:'每季度更新',yearly:'每年更新'};
   const frequencyValues={1440:'three_days',4320:'three_days',10080:'weekly',43200:'monthly',129600:'quarterly',525600:'yearly'};
   const statusNames = { queued: '已排队', paused:'已暂停', parsing: '正在解析', awaiting_confirmation: '等待画质确认', downloading: '正在下载', completed: '完整保存', failed: '失败', interrupted: '已中断', cancelled: '已取消' };
@@ -37,12 +37,13 @@
     return Number.isNaN(date.getTime()) ? '暂无' : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
   }
   async function api(path, method = 'GET', body) {
+    const token=state.token;
     let response;
-    try { response = await fetch(path, { method, headers: { Authorization: `Bearer ${state.token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store', signal: AbortSignal.timeout(60000) }); }
+    try { response = await fetch(path, { method, headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store', signal: AbortSignal.timeout(60000) }); }
     catch (error) { throw new Error(error.name === 'TimeoutError' ? '请求超时，请刷新查看结果，避免重复提交。' : '无法连接网站，请检查 NAS 和网络连接。'); }
     let data; try { data = await response.json(); } catch { throw new Error('网站返回了无法识别的内容，请检查服务状态。'); }
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) disconnect();
+      if ((response.status === 401 || response.status === 403) && token===state.token) disconnect();
       throw new Error(typeof data.detail === 'string' ? data.detail : `请求失败（${response.status}），请检查输入或服务状态。`);
     }
     return data;
@@ -55,6 +56,8 @@
     button.addEventListener('click', async () => { button.disabled = true; try { await operation(); } catch (error) { notice(error.message, true); } finally { button.disabled = false; } }); return button;
   }
   function disconnect() {
+    state.cookieSyncGeneration=(state.cookieSyncGeneration||0)+1;
+    const syncButton=$('cookie-sync-button'),syncLink=$('cookie-sync-link'),syncStatus=$('cookie-sync-status');if(syncButton)syncButton.disabled=false;if(syncLink)syncLink.hidden=true;if(syncStatus)syncStatus.hidden=true;
     switchView('library', document.querySelectorAll('video'));
     state.token = ''; localStorage.removeItem('library_access_key'); state.generation++; state.navigation++;
     $('application').hidden = true; $('connection').hidden = false;
@@ -410,6 +413,41 @@
   $('clear-search').addEventListener('click', () => { $('search-query').value = ''; $('search-author').value = ''; loadLibrary(true).catch(error => notice(error.message, true)); });
   $('shuffle-library').addEventListener('click',()=>{$('search-query').value='';$('search-author').value='';loadLibrary(true).catch(error=>notice(error.message,true));});
   $('back-recommendations').addEventListener('click',()=>{$('search-query').value='';$('search-author').value='';loadLibrary(true).catch(error=>notice(error.message,true));});
+  function showCookieSync(message,error=false){const status=$('cookie-sync-status');$('cookie-sync-message').textContent=message;status.className=`notice${error?' error':''}`;status.hidden=!message;}
+  async function syncBrowserCookie(){
+    const button=$('cookie-sync-button'),link=$('cookie-sync-link');if(button.disabled)return;
+    const token=state.token,run=++state.cookieSyncGeneration,current=()=>Boolean(token)&&state.token===token&&state.cookieSyncGeneration===run;
+    if(!token){showCookieSync('请先连接收藏库。',true);return;}
+    button.disabled=true;link.hidden=true;link.removeAttribute('href');let tab=null,opened=false;
+    try{
+      try{tab=window.open('about:blank','_blank');if(tab)tab.opener=null;}catch{try{tab?.close();}catch{}tab=null;}
+      showCookieSync('正在准备同步…');
+      const created=await api('/api/cookie-sync','POST');
+      if(!current()){try{tab?.close();}catch{}return;}
+      if(typeof created.id!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(created.id))throw new Error('invalid request');
+      const messages={waiting:'请确认已安装助手、登录抖音并允许读取 Cookie。',validating:'正在验证抖音登录状态…',waiting_apply:'已验证，等待当前下载结束后保存…',applying:'正在保存并更新下载设置…'};
+      const needsOpen=created.status==='waiting';
+      if(needsOpen){
+        const url=`https://www.douyin.com/jingxuan#library-cookie-sync=${created.id}`;
+        try{if(tab&&!tab.closed){tab.location.href=url;opened=true;}}catch{}
+        if(!opened){try{tab?.close();}catch{}link.href=url;link.hidden=false;}
+        showCookieSync(opened?messages.waiting:'浏览器阻止了弹窗，请点击链接继续。');
+      }else{try{tab?.close();}catch{}showCookieSync(messages[created.status]||'同步任务正在进行…');}
+      const deadline=Date.now()+35*60*1000;
+      const failures={permission_denied:'未获得 Cookie 读取权限，请在脚本猫中允许后重试。',not_logged_in:'请先在当前浏览器登录抖音，再重试。',read_failed:'无法读取 Cookie，请确认已安装助手并允许读取。',invalid_cookie:'读取的 Cookie 不完整，请先登录抖音再试。',verify_failed:'无法验证 Cookie，请检查抖音登录状态及网络后重试。',expired:'等待超时，请重新同步。',changed:'Cookie 或管理员密钥已变更，请重新同步。',apply_failed:'保存失败，原 Cookie 保留；请检查下载服务后重试。',rollback_failed:'更新未完成，原设置或下载核心需要检查。'};
+      while(current()&&Date.now()<deadline){
+        await new Promise(resolve=>setTimeout(resolve,1200));if(!current())return;
+        const result=await api(`/api/cookie-sync/${created.id}`);if(!current())return;
+        if(result.status==='success'){$('cookie-state').textContent='已配置';$('cookie-state').className='badge good';showCookieSync('Cookie 已验证并同步。');return;}
+        if(result.status==='failed'){showCookieSync(failures[result.reason]||'同步未完成，请检查抖音登录和助手权限后重试。',true);return;}
+        if(!messages[result.status])throw new Error('invalid status');
+        showCookieSync(result.status==='waiting'&&needsOpen&&!opened?'浏览器阻止了弹窗，请点击链接继续。':messages[result.status]);
+      }
+      if(current())showCookieSync('同步等待超时，请重试。',true);
+    }catch{if(!opened)try{tab?.close();}catch{}if(current())showCookieSync('无法完成同步，请检查网站连接和助手设置后重试。',true);}
+    finally{if(state.cookieSyncGeneration===run){button.disabled=false;link.hidden=true;}}
+  }
+  $('cookie-sync-button').addEventListener('click',syncBrowserCookie);
   function paintSound(){const button=$('sound-toggle');button.textContent=state.muted?'声音：关':'声音：开';button.setAttribute('aria-pressed',String(!state.muted));button.title=state.muted?'打开所有视频声音':'关闭所有视频声音';}
   paintSound();
   $('sound-toggle').addEventListener('click',()=>{state.muted=!state.muted;applySound($('feed').querySelectorAll('video'),state.muted);paintSound();const v=activeCard?.querySelector('video');if(v){v.playbackActive=false;playVisible(v,true);}});

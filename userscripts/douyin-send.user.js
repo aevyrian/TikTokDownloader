@@ -3,7 +3,7 @@
 // @name:zh      抖音收藏库助手
 // @name:zh-CN   抖音收藏库助手
 // @namespace    douyin-local-library
-// @version      1.8.6
+// @version      1.9.0
 // @description  识别当前作品与博主，查看更新状态，按需下载并设置追更周期。
 // @match        https://www.douyin.com/*
 // @match        https://douyin.com/*
@@ -11,6 +11,7 @@
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_xmlhttpRequest
+// @grant        GM_cookie
 // @connect      *
 // @run-at       document-idle
 // ==/UserScript==
@@ -77,6 +78,43 @@
     const value = document.createElement(tag); if (className) value.className = className;
     if (text !== undefined) value.textContent = text; return value;
   }
+  const cookieSync = douyinURL(location.href) && /^#library-cookie-sync=([A-Za-z0-9_-]{43})$/.exec(location.hash || '');
+  if (cookieSync) {
+    const nonce=cookieSync[1], banner=node('div','','正在连接抖音收藏库…');
+    banner.setAttribute('role','status');banner.setAttribute('aria-live','polite');
+    banner.style.cssText='position:fixed;z-index:2147483647;top:16px;right:16px;max-width:320px;padding:12px 16px;background:#22252f;color:white;border:1px solid #ffffff38;border-radius:10px;font:14px/1.5 system-ui,sans-serif;box-shadow:0 4px 16px #0004';
+    document.body.append(banner);
+    try{globalThis.history.replaceState(globalThis.history.state,'',location.pathname+location.search);}catch{}
+    let origin,token;
+    try{origin=normalizeServer(GM_getValue('library_server',''));token=GM_getValue('library_token','');if(!token)throw new Error();}
+    catch{banner.textContent='请先在助手的连接设置中保存网站地址和密钥。';return;}
+    const call=(method,data)=>new Promise((resolve,reject)=>GM_xmlhttpRequest({method,url:origin+'/api/cookie-sync/'+nonce,timeout:20000,
+      headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},...(data?{data:JSON.stringify(data)}:{}),
+      onload(response){let value;try{value=JSON.parse(response.responseText);}catch{reject();return;}if(response.status>=200&&response.status<300)resolve(value);else reject();},
+      onerror:reject,ontimeout:reject,onabort:reject}));
+    async function report(error){
+      try{await call('POST',{error});banner.textContent=error==='permission_denied'?'未授权读取，请返回收藏库重试。':error==='not_logged_in'?'请先登录抖音，再返回收藏库重试。':'读取失败，请返回收藏库重试。';}
+      catch{banner.textContent='无法通知收藏库，请返回网站重试。';}
+    }
+    (async()=>{
+      try{const state=await call('GET');if(state?.status!=='waiting')throw new Error();}
+      catch{banner.textContent='同步请求已失效，请返回收藏库重试。';return;}
+      let cookies;
+      try{
+        if(typeof GM_cookie!=='function')throw new Error('unsupported');
+        cookies=await new Promise((resolve,reject)=>GM_cookie('list',{url:'https://www.douyin.com/'},(values,error)=>error?reject(error):resolve(values)));
+      }catch(error){await report(/denied|permission|not allowed|unauthori|拒绝/i.test(typeof error==='string'?error:String(error?.message||''))?'permission_denied':'read_failed');return;}
+      if(!Array.isArray(cookies)){await report('read_failed');return;}
+      const allowed=cookies.filter(c=>c&&typeof c.name==='string'&&typeof c.value==='string'&&typeof c.domain==='string'&&
+        ['douyin.com','www.douyin.com'].includes(c.domain.replace(/^\./,''))&&/^[!#$%&'*+\-.^_\x60|~0-9A-Za-z]+$/.test(c.name)&&!/[\x00-\x1f\x7f;]/.test(c.value));
+      if(!allowed.some(c=>/^(sessionid|sessionid_ss|sid_tt)$/.test(c.name)&&c.value)){await report('not_logged_in');return;}
+      const cookie=allowed.map(c=>c.name+'='+c.value).join('; ');
+      if(cookie.length>30000){await report('read_failed');return;}
+      try{await call('POST',{cookie});banner.textContent='已提交验证，请返回抖音收藏库查看结果。';}
+      catch{banner.textContent='提交失败，请返回收藏库重试。';}
+    })();
+    return;
+  }
   const host = node('div'); host.id = 'douyin-library-sender'; host.hidden = true;
   host.style.cssText = 'position:fixed;width:44px;height:44px;z-index:2147483647';
   const shadow = host.attachShadow({mode:'closed'}), style = node('style');
@@ -85,7 +123,7 @@
 section{position:fixed;width:304px;padding:17px;background:#24252bf7;border:1px solid #ffffff20;border-radius:15px;box-shadow:0 14px 44px #0005;max-height:calc(100dvh - 24px);overflow:auto;scrollbar-width:thin}
 header,.identity,.status-heading,.status-times,.quick-actions,.footer{display:flex;align-items:center;gap:8px}header{justify-content:space-between;margin-bottom:13px}header strong{font-size:14px}header small{font-size:10px;color:#afb0bb;margin-left:8px}
 button,input,select{font:inherit;color:inherit}button,a,input,select,summary{outline-offset:3px}button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid #ff8ba5}button{cursor:pointer;border:1px solid #ffffff1c;border-radius:9px;background:#ffffff06;padding:9px 11px;text-align:center}button:hover{background:#ffffff10}button:disabled{cursor:default;opacity:.48}
-.close{width:28px;height:28px;padding:0;font-size:22px;line-height:1;border:0;background:transparent;color:#b9bac5}.toggle{display:grid;place-items:center;width:44px;height:44px;padding:0;border-radius:12px;color:#fff;background:#00000047;border-color:#ffffff30;box-shadow:none}.toggle:hover{background:#0006;border-color:#ffffff4d}.toggle[aria-expanded=true]{color:#fff;background:#00000073;border-color:#ffffff66}.toggle svg{pointer-events:none}
+.close{width:28px;height:28px;padding:0;font-size:22px;line-height:1;border:0;background:transparent;color:#b9bac5}.toggle{display:grid;place-items:center;width:44px;height:44px;padding:0;border-radius:11px;color:#fff;background:rgba(0,0,0,.3);border-color:rgba(255,255,255,.12);box-shadow:none}.toggle:hover{background:rgba(0,0,0,.3);border-color:#ffffff38}.toggle[aria-expanded=true]{color:#fff;background:rgba(0,0,0,.3);border-color:#ffffff40}.toggle svg{pointer-events:none;filter:drop-shadow(0 0 2.5px #0000004d)}
 .identity{margin-bottom:12px;min-width:0}.creator{font-size:14px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.context-label{flex:none;font-size:10px;color:#aaaab6}.creator-status{padding:12px;border:1px solid #ffffff1d;border-radius:10px;background:#ffffff04;margin-bottom:12px;transition:background .15s,border-color .15s}.creator-status[data-state=submitted]{background:#ff507716;border-color:#ff78976b}.status-heading{justify-content:space-between;margin-bottom:9px}.subscription-state{font-weight:600;font-size:12px}.subscription-state:before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:7px;background:#9699ad}.creator-status[data-enabled=true] .subscription-state:before{background:#ff8ba5}.refresh-state{padding:0;background:transparent;border:0;font-size:10px;color:#c5c6d1}
 .status-times{align-items:start;gap:10px}.status-times>div{flex:1;min-width:0}.status-times small{display:block;font-size:10px;color:#a8a9b5}.last-success,.next-check{display:block;font-size:11px;margin-top:2px;overflow-wrap:anywhere}.state-note{margin:8px 0 0;font-size:10px;color:#c2c3ce;overflow-wrap:anywhere}
 .actions{display:grid;gap:8px}.actions>button{width:100%;min-height:39px}.quick-actions>*{flex:1;min-width:0}.quick-actions button,.quick-actions a{font-size:11px;min-height:37px}.primary{background:#ff507710;border-color:#ff789749;font-weight:600}.primary:hover{background:#ff50771c}a{color:#d4d5df;text-decoration:none}.archive-link{display:flex;align-items:center;justify-content:center;border:1px solid #ffffff1c;border-radius:9px;padding:8px}
@@ -95,7 +133,7 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
   `;
   const panel=node('section');panel.hidden=true;panel.setAttribute('aria-label','抖音收藏库下载面板');
   const toggle=node('button','toggle');toggle.title='抖音收藏库 · 下载到媒体库';
-  toggle.innerHTML='<svg viewBox="0 0 28 28" width="26" height="26" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 19.5H7a4.5 4.5 0 0 1-.6-8.96 6.5 6.5 0 0 1 12.4-2.7A5 5 0 0 1 20 17.7h-.9" stroke="currentColor" stroke-width="2.3"/><path d="M14 12.5v11m-4-4 4 4 4-4" stroke="#111" stroke-opacity=".6" stroke-width="4.8"/><path d="M14 12.5v11m-4-4 4 4 4-4" stroke="currentColor" stroke-width="2.7"/></svg>';
+  toggle.innerHTML='<svg viewBox="0 0 28 28" width="26" height="26" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 19.5H7a4.5 4.5 0 0 1-.6-8.96 6.5 6.5 0 0 1 12.4-2.7A5 5 0 0 1 20 17.7h-.9" stroke="currentColor" stroke-width="2.3"/><path d="M14 12.5v11m-4-4 4 4 4-4" stroke="currentColor" stroke-width="2.7"/></svg>';
   toggle.setAttribute('aria-label','打开媒体库发送菜单');toggle.setAttribute('aria-expanded','false');
   const header=node('header'), brand=node('div'), title=node('strong','','抖音收藏库'), subtitle=node('small','','下载与归档'),close=node('button','close','×');
   close.setAttribute('aria-label','收起下载面板');brand.append(title,subtitle);header.append(brand,close);
@@ -119,7 +157,7 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
   const preference=node('select');for(const [value,text] of [['detail','突出当前作品'],['author','突出博主更新']]){const option=node('option','',text);option.value=value;preference.append(option);}preference.value=defaultKind(GM_getValue('library_default_kind','author'));
   function field(text,control){const label=node('label','',text);label.append(control);form.append(label);}
   field('网站地址',serverInput);field('管理员密钥',tokenInput);field('默认下载操作',preference);const save=node('button','','保存设置');save.type='submit';form.append(save);settings.append(summary,form);
-  const footer=node('div','footer');footer.append(node('small','','助手 1.8.6'),node('span','','下载后在媒体库查看进度'));
+  const footer=node('div','footer');footer.append(node('small','','助手 1.9.0'),node('span','','下载后在媒体库查看进度'));
   panel.append(header,downloads,status,settings,footer);shadow.append(style,panel,toggle);document.body.append(host);
   let targets={detail:null,author:null},anchor=null,authors=null,history=null,loading=null,generation=0,dataRevision=0,viewRevision=0,busy=false,frequencyDirty=false,settingsOverride=false,currentName='',stateAttempted=false;
   const recent=new Set(),feedback=new Map();

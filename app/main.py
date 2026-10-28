@@ -20,9 +20,10 @@ from .core import Core, download_directory, normalize_input
 from .store import Store, FREQUENCIES, BEIJING
 from .legacy import LegacyIndex, recorded_download, recorded_downloads
 from .playback import PlaybackCache
+from .cookie_sync import CookieSync
 
 
-VERSION = "1.3.4"
+VERSION = "1.3.5"
 BASE = Path(__file__).resolve().parent
 
 
@@ -237,7 +238,8 @@ class JobService:
     async def run(self):
         self.running = True
         try:
-            await self.initialize()
+            async with self.lock:
+                await self.initialize()
             async with asyncio.TaskGroup() as group:
                 group.create_task(self.run_queue())
                 group.create_task(self.run_schedule())
@@ -283,6 +285,12 @@ class SettingsInput(BaseModel):
     quality_policy: str | None = None
     interval_minutes: int | None = Field(default=None, ge=5, le=525600)
     download_dir: str | None = Field(default=None, max_length=1000)
+
+
+class CookieSyncInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    cookie: str | None = Field(default=None, min_length=1, max_length=30000)
+    error: Literal["permission_denied", "not_logged_in", "read_failed"] | None = None
 
 
 class AdminKeyInput(BaseModel):
@@ -333,6 +341,7 @@ def make_app(data_dir=None, media_dir=None, token=None, core=None, legacy_dir=No
     legacy = LegacyIndex(store, legacy_dir or os.environ.get("APP_LEGACY"))
     service = JobService(store, core, media_dir, legacy.root)
     playback = PlaybackCache(data_dir / 'playback-cache')
+    cookie_sync = CookieSync(store, service)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -344,6 +353,7 @@ def make_app(data_dir=None, media_dir=None, token=None, core=None, legacy_dir=No
         try:
             yield
         finally:
+            await cookie_sync.close()
             await playback.close()
             await legacy.close()
             service.running = False
@@ -357,6 +367,7 @@ def make_app(data_dir=None, media_dir=None, token=None, core=None, legacy_dir=No
     app = FastAPI(title="Cloudrift", version=VERSION, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.service, app.state.store, app.state.legacy = service, store, legacy
     app.state.playback = playback
+    app.state.cookie_sync = cookie_sync
 
     def authorize(request: Request):
         supplied = request.headers.get("Authorization", "")
@@ -430,6 +441,38 @@ def make_app(data_dir=None, media_dir=None, token=None, core=None, legacy_dir=No
     @app.get("/api/settings", dependencies=[Depends(authorize)])
     async def settings():
         return settings_response()
+
+    @app.post("/api/cookie-sync")
+    async def create_cookie_sync(owner=Depends(authorize)):
+        try:
+            result = await cookie_sync.create(owner)
+        except ValueError:
+            raise HTTPException(409, "已有同步请求正在处理，请稍后重试") from None
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/cookie-sync/{request_id}")
+    async def get_cookie_sync(request_id: str, owner=Depends(authorize)):
+        try:
+            result = cookie_sync.view(request_id, owner)
+        except ValueError:
+            raise HTTPException(404, "Cookie 同步请求不存在或已过期，请重新操作") from None
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/cookie-sync/{request_id}")
+    async def submit_cookie_sync(request_id: str, body: CookieSyncInput, owner=Depends(authorize)):
+        if (body.cookie is None) == (body.error is None):
+            raise HTTPException(422, "请提交读取结果或固定错误状态")
+        try:
+            current = cookie_sync.view(request_id, owner)
+        except ValueError:
+            raise HTTPException(404, "Cookie 同步请求不存在或已过期，请重新操作") from None
+        if current["status"] != "waiting":
+            raise HTTPException(409, "Cookie 同步请求已处理，请重新操作")
+        try:
+            result = cookie_sync.submit(request_id, owner, cookie=body.cookie, error=body.error)
+        except ValueError:
+            raise HTTPException(409, "Cookie 同步请求已处理，请重新操作") from None
+        return JSONResponse(result, status_code=202, headers={"Cache-Control": "no-store"})
 
     @app.put("/api/settings", dependencies=[Depends(authorize)])
     async def save_settings(body: SettingsInput):
