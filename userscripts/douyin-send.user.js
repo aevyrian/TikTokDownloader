@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cloudrift Sender
 // @namespace    douyin-local-library
-// @version      1.8.1
+// @version      1.8.2
 // @description  识别当前作品与博主，查看更新状态，按需下载并设置追更周期。
 // @match        https://www.douyin.com/*
 // @match        https://douyin.com/*
@@ -55,7 +55,7 @@
     const work = !standalone && scope?.querySelector('a[href*="/video/"], a[href*="/note/"]')?.href;
     const author = scope?.querySelector('a[data-e2e="video-author-name"], a[data-e2e="video-avatar"]')
       || scope?.querySelector('[data-e2e="user-info"] a[href*="/user/"]');
-    const card = standalone ? null : scope?.matches('[data-e2e-vid]') ? scope : scope?.querySelector('[data-e2e-vid], [data-e2e-aweme-id]');
+    const card = standalone ? null : scope?.matches('[data-e2e-vid], [data-e2e-aweme-id]') ? scope : scope?.querySelector('[data-e2e-vid], [data-e2e-aweme-id]');
     const activeId = card?.getAttribute('data-e2e-vid') || card?.getAttribute('data-e2e-aweme-id');
     return { author, targets: resolveTargets(page, work, author?.href, activeId) };
   }
@@ -117,7 +117,7 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
   const preference=node('select');for(const [value,text] of [['detail','突出当前作品'],['author','突出博主更新']]){const option=node('option','',text);option.value=value;preference.append(option);}preference.value=defaultKind(GM_getValue('library_default_kind','author'));
   function field(text,control){const label=node('label','',text);label.append(control);form.append(label);}
   field('网站地址',serverInput);field('管理员密钥',tokenInput);field('默认下载操作',preference);const save=node('button','','保存设置');save.type='submit';form.append(save);settings.append(summary,form);
-  const footer=node('div','footer');footer.append(node('small','','SENDER 1.8.1'),node('span','','下载后在媒体库查看进度'));
+  const footer=node('div','footer');footer.append(node('small','','SENDER 1.8.2'),node('span','','下载后在媒体库查看进度'));
   panel.append(header,downloads,status,settings,footer);shadow.append(style,panel,toggle);document.body.append(host);
   let targets={detail:null,author:null},anchor=null,authors=null,history=null,loading=null,generation=0,dataRevision=0,viewRevision=0,busy=false,frequencyDirty=false,settingsOverride=false,currentName='',stateAttempted=false;
   const recent=new Set(),feedback=new Map();
@@ -167,11 +167,16 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
     const page=resolveTargets(location.href),profile=!page.detail&&/^\/user\/[A-Za-z0-9_-]{6,128}\/?$/.test(location.pathname);
     const details=[...document.querySelectorAll('[data-e2e="video-detail"], [data-e2e="note-detail"]')].filter(visible);
     const dialog=[...document.querySelectorAll('[role="dialog"]')].reverse().find(d=>visible(d)&&d.querySelector('[data-e2e="video-detail"], [data-e2e="note-detail"]'));
-    const allowed=Boolean(profile||page.detail);
+    const feed=!profile&&[...document.querySelectorAll('[data-e2e="feed-active-video"]')].find(element=>{
+      if(!visible(element))return false;
+      const card=element.matches('[data-e2e-vid], [data-e2e-aweme-id]')?element:element.querySelector('[data-e2e-vid], [data-e2e-aweme-id]');
+      return /^\d{19}$/.test(card?.getAttribute('data-e2e-vid')||card?.getAttribute('data-e2e-aweme-id')||'');
+    });
+    const allowed=Boolean(profile||page.detail||feed);
     const modal=new URL(location.href).searchParams.get('modal_id');
-    let scope=allowed?(modal?(dialog?.querySelector('[data-e2e="video-detail"], [data-e2e="note-detail"]')||details[details.length-1]):details[0]):null;
+    let scope=profile?null:page.detail?(modal?(dialog?.querySelector('[data-e2e="video-detail"], [data-e2e="note-detail"]')||details[details.length-1]):details[0]):feed;
     if(page.detail){const id=page.detail.split('/').pop(),item=document.querySelector(`[data-e2e-vid="${id}"], [data-e2e-aweme-id="${id}"]`);if(visible(item))scope=item.closest('[data-e2e="video-detail"], [data-e2e="note-detail"], [data-e2e="feed-active-video"]')||item;}
-    if(!scope&&allowed)scope=[...document.querySelectorAll('[data-e2e="feed-active-video"]')].find(visible);
+    if(!scope&&!profile)scope=feed;
     const current=allowed?pageTargets(scope,location.href):{author:null,targets:{detail:null,author:null}};
     if(profile)current.targets.author=page.author;
     const changed=targets.detail!==current.targets.detail||targets.author!==current.targets.author;

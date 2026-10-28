@@ -52,6 +52,8 @@ assert.deepEqual(pageTargets(detailScope, `https://www.douyin.com/video/${sample
 assert.deepEqual(pageTargets(detailScope, `https://www.douyin.com/note/${sample}`).targets,
   {detail:`https://www.douyin.com/note/${sample}`,author:creator.href}, '独立图集页保留当前图集链接与博主');
 assert.deepEqual(pageTargets(null,creator.href).targets,{detail:null,author:creator.href},'博主页没有播放器时也能发送');
+const awemeScope={matches:selector=>selector==='[data-e2e-vid], [data-e2e-aweme-id]',querySelector:()=>null,getAttribute:name=>name==='data-e2e-aweme-id'?sample:null};
+assert.equal(pageTargets(awemeScope,'https://www.douyin.com/?recommend=1').targets.detail,`https://www.douyin.com/video/${sample}`,'识别当前容器自身的作品标识');
 assert.deepEqual(resolveTargets(`https://www.douyin.com/video/${sample}`), {
   detail: `https://www.douyin.com/video/${sample}`, author: null,
 });
@@ -116,7 +118,7 @@ assert.equal(moveGallery(1, 1, 3), 2);
 assert.equal(moveGallery(2, 1, 3), 2);
 assert.equal(moveGallery(0, 1, 0), 0);
 // Execute the Sender in a small browser stub, exercising the actual request and UI flow.
-function browser(url = subscribedURL) {
+function browser(url = subscribedURL, {feed = null, preview = null} = {}) {
   const elements = [], requests = [], callbacks = {}, frame = [];
   function element(tag) {
     const listeners = {}, attrs = {};
@@ -139,7 +141,7 @@ function browser(url = subscribedURL) {
   const page = new URL(url), storage={library_server:'http://nas.example:8090',library_token:'test-token'};
   const doc={body:element('body'),createElement:element,
     querySelector(selector){return selector==='h1'?{textContent:page.pathname.includes('someone_else')?'乙博主':'甲博主'}:null},
-    querySelectorAll(){return []},addEventListener(name,fn){callbacks['document:'+name]=fn}};
+    querySelectorAll(selector){if(selector==='[data-e2e="feed-active-video"]')return feed?[feed]:[];if(selector==='[data-e2e="video-detail"], [data-e2e="note-detail"]')return preview?[preview]:[];return []},addEventListener(name,fn){callbacks['document:'+name]=fn}};
   const observer=class {constructor(fn){callbacks.mutation=fn}observe(){}disconnect(){}};
   runInNewContext(readFileSync(script,'utf8'),{URL,document:doc,location:page,innerWidth:1200,innerHeight:800,
     GM_getValue(key,fallback){return storage[key]??fallback}, GM_setValue(key,value){storage[key]=value},
@@ -163,6 +165,26 @@ const request=(b,method,path)=>b.requests.findLast(r=>r.method===method&&new URL
 const body=r=>JSON.parse(r.data);
 const activate=b=>b.find('Cloudrift · 下载到媒体库','title').click();
 const select=(b,value)=>{const el=b.elements.find(e=>e.getAttribute('aria-label')==='博主更新周期');el.value=value;el.dispatch('change');return el};
+
+const feedId='7701550905683391333';
+const feedAuthor={...creator,textContent:'',parentElement:null,getBoundingClientRect:()=>({width:40,height:40,top:100,bottom:140,left:100})};
+const feed={matches:s=>s==='[data-e2e-vid], [data-e2e-aweme-id]',getAttribute:name=>name==='data-e2e-vid'?feedId:null,
+  querySelector:s=>s==='a[data-e2e="video-author-name"], a[data-e2e="video-avatar"]'||s==='[data-e2e="video-avatar"]'?feedAuthor:s==='[data-e2e="feed-video-nickname"]'?{textContent:'推荐博主'}:null,
+  querySelectorAll:()=>[],contains:()=>false,getBoundingClientRect:()=>({width:1000,height:700,top:0,bottom:700,left:0})};
+const recommendation=browser('https://www.douyin.com/?recommend=1',{feed});
+assert.equal(recommendation.host.hidden,false,'推荐流播放作品时显示入口');
+assert.equal(recommendation.byClass('creator').textContent,'推荐博主','显示当前推荐作品的博主');
+activate(recommendation);
+recommendation.find('下载当前作品').click();
+assert.equal(body(request(recommendation,'POST','/api/tasks')).link,`https://www.douyin.com/video/${feedId}`,'下载当前推荐作品而不是其他作品');
+const hover=browser('https://www.douyin.com/jingxuan',{preview:feed});
+assert.equal(hover.host.hidden,true,'首页网格悬停预览不能显示入口');
+const invalidFeed=browser('https://www.douyin.com/?recommend=1',{feed:{...feed,getAttribute:()=> '123'}});
+assert.equal(invalidFeed.host.hidden,true,'没有有效作品标识的推荐流不能显示入口');
+const profileWithBackground=browser(subscribedURL,{feed});
+assert.equal(profileWithBackground.host.hidden,false);
+assert.equal(profileWithBackground.byClass('creator').textContent,'甲博主','博主页不能识别背景推荐流的博主');
+assert.equal(profileWithBackground.find('下载当前作品').disabled,true,'博主页不能下载背景推荐流作品');
 
 const home=browser('https://www.douyin.com/jingxuan');
 assert.equal(home.host.hidden,true,'首页网格无作品详情时隐藏入口');
