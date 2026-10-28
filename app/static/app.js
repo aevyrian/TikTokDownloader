@@ -68,8 +68,8 @@
   function connectionMode() {
     const setup = Boolean(state.auth?.setup_required);
     $('access-eyebrow').textContent = setup ? 'MAKE IT YOURS' : 'WELCOME BACK';
-    $('access-title').textContent = setup ? '先设一把自己的密钥' : '回到你的私人放映室';
-    $('access-description').textContent = setup ? '首次设置后，你就是这间媒体库的管理员。' : '登录 Cloudrift，继续上次没看完的喜欢。';
+    $('access-title').textContent = setup ? '先设一把自己的密钥' : '进入抖音收藏库';
+    $('access-description').textContent = setup ? '首次设置后，你就是这间媒体库的管理员。' : '登录抖音收藏库，继续上次没看完的喜欢。';
     $('access-key-label').textContent = setup ? '设置管理员密钥' : '管理员密钥';
     $('access-key').autocomplete = setup ? 'new-password' : 'current-password';
     $('access-key').minLength = setup ? 8 : 1;
@@ -273,7 +273,7 @@
     }
     const info = element('div', 'work-info'); const author = element('button', '', `@${work.author || '未知作者'}`);
     author.addEventListener('click', () => { const value = String(work.author_id || work.author || ''); if (![...$('search-author').options].some(option => option.value === value)) $('search-author').append(new Option(work.author || value, value)); $('search-query').value='';$('search-author').value = value;(state.view==='library'?loadLibrary(true):navigate('library')).catch(error => notice(error.message, true)); });
-    info.append(author, element('p', '', work.description || '这条作品没有文字描述'), element('small', '', `${work.source === 'legacy' ? '原有收藏 · ' : ''}${work.type || '作品'} · ${formatDate(work.created_at)} · Cloudrift`)); card.append(info);
+    info.append(author, element('p', '', work.description || '这条作品没有文字描述'), element('small', '', `${work.source === 'legacy' ? '原有收藏 · ' : ''}${work.type || '作品'} · ${formatDate(work.created_at)} · 抖音收藏库`)); card.append(info);
     const tools = element('div', 'work-tools');
     const avatar = action(authorInitial(work.author), () => author.click()); avatar.className = 'author-avatar'; avatar.setAttribute('aria-label', `查看${work.author || '作者'}的作品`);
     const original = element('a', 'work-tool', '↗'); original.href = `https://www.douyin.com/${work.type === '视频' ? 'video' : 'note'}/${work.id}`; original.target = '_blank'; original.rel = 'noopener noreferrer'; original.setAttribute('aria-label', '打开抖音原作'); original.title = '原作';
@@ -453,7 +453,7 @@
       await api('/api/auth/key', 'PUT', { key });
       state.token = key; localStorage.setItem('library_access_key', key); state.auth.setup_required = false;
       event.target.reset(); await loadSettings();
-      $('admin-key-message').textContent = '已修改。当前浏览器保持登录，请把 Cloudrift Sender 中的旧密钥换成新密钥。';
+      $('admin-key-message').textContent = '已修改。当前浏览器保持登录，请把 抖音收藏库助手 中的旧密钥换成新密钥。';
       notice('管理员密钥已修改，旧密钥已失效。');
     } catch (error) { $('admin-key-message').textContent = error.message; }
     finally { button.disabled = false; }

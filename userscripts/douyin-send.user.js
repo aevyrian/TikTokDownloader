@@ -1,7 +1,9 @@
 // ==UserScript==
 // @name         Cloudrift Sender
+// @name:zh      抖音收藏库助手
+// @name:zh-CN   抖音收藏库助手
 // @namespace    douyin-local-library
-// @version      1.8.2
+// @version      1.8.3
 // @description  识别当前作品与博主，查看更新状态，按需下载并设置追更周期。
 // @match        https://www.douyin.com/*
 // @match        https://douyin.com/*
@@ -83,7 +85,7 @@
 section{position:fixed;width:304px;padding:17px;background:#24252bf7;border:1px solid #ffffff20;border-radius:15px;box-shadow:0 14px 44px #0005;max-height:calc(100dvh - 24px);overflow:auto;scrollbar-width:thin}
 header,.identity,.status-heading,.status-times,.quick-actions,.footer{display:flex;align-items:center;gap:8px}header{justify-content:space-between;margin-bottom:13px}header strong{font-size:14px}header small{font-size:10px;color:#afb0bb;margin-left:8px}
 button,input,select{font:inherit;color:inherit}button,a,input,select,summary{outline-offset:3px}button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid #ff8ba5}button{cursor:pointer;border:1px solid #ffffff1c;border-radius:9px;background:#ffffff06;padding:9px 11px;text-align:center}button:hover{background:#ffffff10}button:disabled{cursor:default;opacity:.48}
-.close{width:28px;height:28px;padding:0;font-size:22px;line-height:1;border:0;background:transparent;color:#b9bac5}.toggle{display:grid;place-items:center;width:44px;height:44px;padding:0;border-radius:12px;background:#272830ed;border-color:#ffffff28;box-shadow:0 3px 12px #0003}.toggle[aria-expanded=true]{color:#ff8ba5;background:#303039;border-color:#ff8ba570}.toggle svg{pointer-events:none}
+.close{width:28px;height:28px;padding:0;font-size:22px;line-height:1;border:0;background:transparent;color:#b9bac5}.toggle{display:grid;place-items:center;width:44px;height:44px;padding:0;border-radius:12px;background:#27283080;border-color:#ffffff24;box-shadow:0 3px 12px #0002}.toggle:hover{background:#272830a6;border-color:#ffffff38}.toggle[aria-expanded=true]{color:#ff8ba5;background:#303039b3;border-color:#ff8ba570}.toggle svg{pointer-events:none}
 .identity{margin-bottom:12px;min-width:0}.creator{font-size:14px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.context-label{flex:none;font-size:10px;color:#aaaab6}.creator-status{padding:12px;border:1px solid #ffffff1d;border-radius:10px;background:#ffffff04;margin-bottom:12px;transition:background .15s,border-color .15s}.creator-status[data-state=submitted]{background:#ff507716;border-color:#ff78976b}.status-heading{justify-content:space-between;margin-bottom:9px}.subscription-state{font-weight:600;font-size:12px}.subscription-state:before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:7px;background:#9699ad}.creator-status[data-enabled=true] .subscription-state:before{background:#ff8ba5}.refresh-state{padding:0;background:transparent;border:0;font-size:10px;color:#c5c6d1}
 .status-times{align-items:start;gap:10px}.status-times>div{flex:1;min-width:0}.status-times small{display:block;font-size:10px;color:#a8a9b5}.last-success,.next-check{display:block;font-size:11px;margin-top:2px;overflow-wrap:anywhere}.state-note{margin:8px 0 0;font-size:10px;color:#c2c3ce;overflow-wrap:anywhere}
 .actions{display:grid;gap:8px}.actions>button{width:100%;min-height:39px}.quick-actions>*{flex:1;min-width:0}.quick-actions button,.quick-actions a{font-size:11px;min-height:37px}.primary{background:#ff507710;border-color:#ff789749;font-weight:600}.primary:hover{background:#ff50771c}a{color:#d4d5df;text-decoration:none}.archive-link{display:flex;align-items:center;justify-content:center;border:1px solid #ffffff1c;border-radius:9px;padding:8px}
@@ -91,11 +93,11 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
 .status{font-size:11px;color:#e1e1ea;overflow-wrap:anywhere;margin:11px 0 0}.status:empty{display:none}.status.error{color:#ffabbf}details{margin-top:13px;padding-top:11px;border-top:1px solid #ffffff14}summary{display:flex;justify-content:space-between;align-items:center;min-height:27px;color:#c4c5cf;cursor:pointer;list-style:none;font-size:11px}summary:after{content:"›";font-size:18px}details[open] summary:after{transform:rotate(90deg)}summary::-webkit-details-marker{display:none}form label{display:block;margin:10px 0;color:#bfc0cd;font-size:11px}form input,form select{margin-top:5px}form button{width:100%;margin-top:3px}.footer{justify-content:space-between;margin-top:10px;color:#9698a6;font-size:9px;letter-spacing:.3px}
 @media(prefers-reduced-motion:reduce){.creator-status{transition:none}}
   `;
-  const panel=node('section');panel.hidden=true;panel.setAttribute('aria-label','Cloudrift 下载面板');
-  const toggle=node('button','toggle');toggle.title='Cloudrift · 下载到媒体库';
+  const panel=node('section');panel.hidden=true;panel.setAttribute('aria-label','抖音收藏库下载面板');
+  const toggle=node('button','toggle');toggle.title='抖音收藏库 · 下载到媒体库';
   toggle.innerHTML='<svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg>';
   toggle.setAttribute('aria-label','打开媒体库发送菜单');toggle.setAttribute('aria-expanded','false');
-  const header=node('header'), brand=node('div'), title=node('strong','','Cloudrift'), subtitle=node('small','','下载与归档'),close=node('button','close','×');
+  const header=node('header'), brand=node('div'), title=node('strong','','抖音收藏库'), subtitle=node('small','','下载与归档'),close=node('button','close','×');
   close.setAttribute('aria-label','收起下载面板');brand.append(title,subtitle);header.append(brand,close);
   const creator=node('strong','creator','正在识别博主'),contextLabel=node('span','context-label','· 当前作品'),identity=node('div','identity');identity.append(creator,contextLabel);
   const card=node('div','creator-status'),heading=node('div','status-heading'),subscriptionLabel=node('span','subscription-state','待核对'),refresh=node('button','refresh-state','刷新 ↻');
@@ -117,7 +119,7 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
   const preference=node('select');for(const [value,text] of [['detail','突出当前作品'],['author','突出博主更新']]){const option=node('option','',text);option.value=value;preference.append(option);}preference.value=defaultKind(GM_getValue('library_default_kind','author'));
   function field(text,control){const label=node('label','',text);label.append(control);form.append(label);}
   field('网站地址',serverInput);field('管理员密钥',tokenInput);field('默认下载操作',preference);const save=node('button','','保存设置');save.type='submit';form.append(save);settings.append(summary,form);
-  const footer=node('div','footer');footer.append(node('small','','SENDER 1.8.2'),node('span','','下载后在媒体库查看进度'));
+  const footer=node('div','footer');footer.append(node('small','','助手 1.8.3'),node('span','','下载后在媒体库查看进度'));
   panel.append(header,downloads,status,settings,footer);shadow.append(style,panel,toggle);document.body.append(host);
   let targets={detail:null,author:null},anchor=null,authors=null,history=null,loading=null,generation=0,dataRevision=0,viewRevision=0,busy=false,frequencyDirty=false,settingsOverride=false,currentName='',stateAttempted=false;
   const recent=new Set(),feedback=new Map();
@@ -227,7 +229,7 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
   refresh.addEventListener('click',()=>{recent.clear();feedback.clear();message('');loadState(true).catch(()=>{});});
   libraryLink.addEventListener('click',event=>{if(!configured()){event.preventDefault();configure();}});
   form.addEventListener('submit',event=>{event.preventDefault();let value;try{value=normalizeServer(serverInput.value);}catch(error){message(error.message,true);return;}const token=tokenInput.value.trim()||GM_getValue('library_token','');if(!token){message('请填写管理员密钥。',true);return;}GM_setValue('library_server',value);GM_setValue('library_token',token);GM_setValue('library_default_kind',defaultKind(preference.value));tokenInput.value='';settingsOverride=false;settings.open=false;clearState();message('设置已保存。');detect();});
-  settings.addEventListener('toggle',()=>{panel.classList.toggle('settings-open',settings.open);title.textContent=settings.open?'连接与下载设置':'Cloudrift';summary.textContent=settings.open?'‹ 返回下载':'连接与下载设置';position();});
+  settings.addEventListener('toggle',()=>{panel.classList.toggle('settings-open',settings.open);title.textContent=settings.open?'连接与下载设置':'抖音收藏库';summary.textContent=settings.open?'‹ 返回下载':'连接与下载设置';position();});
   host.addEventListener('keydown',event=>{if(event.key==='Escape'&&!panel.hidden){settingsOverride=false;togglePanel(panel,toggle);toggle.focus();detect();}});
   document.addEventListener('pointerdown',event=>{if(!panel.hidden&&!host.contains(event.target)){settingsOverride=false;togglePanel(panel,toggle);}});
   let frame=0;function scheduleDetect(){if(!frame)frame=requestAnimationFrame(()=>{frame=0;detect();});}
@@ -237,5 +239,5 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
   document.addEventListener('click',scheduleDetect,true);document.addEventListener('transitionend',scheduleDetect,true);
   addEventListener('popstate',scheduleDetect);addEventListener('hashchange',scheduleDetect);addEventListener('resize',scheduleDetect);
   globalThis.navigation?.addEventListener('navigatesuccess',scheduleDetect);
-  new ResizeObserver(position).observe(panel);GM_registerMenuCommand('Cloudrift · 连接与下载设置',configure);setInterval(detect,1500);detect();
+  new ResizeObserver(position).observe(panel);GM_registerMenuCommand('抖音收藏库 · 连接与下载设置',configure);setInterval(detect,1500);detect();
 })();

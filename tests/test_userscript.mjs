@@ -163,7 +163,7 @@ const authorA={id:'a',url:subscribedURL,name:'甲博主',enabled:true,interval_m
 const knownB={id:'b',url:authorB,name:'乙博主',enabled:true,interval_minutes:10080,next_check:1793534400};
 const request=(b,method,path)=>b.requests.findLast(r=>r.method===method&&new URL(r.url).pathname===path);
 const body=r=>JSON.parse(r.data);
-const activate=b=>b.find('Cloudrift · 下载到媒体库','title').click();
+const activate=b=>b.find('抖音收藏库 · 下载到媒体库','title').click();
 const select=(b,value)=>{const el=b.elements.find(e=>e.getAttribute('aria-label')==='博主更新周期');el.value=value;el.dispatch('change');return el};
 
 const feedId='7701550905683391333';

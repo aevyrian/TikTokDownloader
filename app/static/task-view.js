@@ -72,7 +72,7 @@
       const chosen = selectedTask(visible, selected);
       if (!visible.length) {
         const empty = node('div', 'empty task-empty'), filtered = Boolean(query.value.trim() || filter !== 'all');
-        empty.append(node('span', 'empty-symbol', '↓'), node('strong', '', filtered ? '没有匹配的任务' : '还没有下载任务'), node('p', '', filtered ? '换个关键词，或查看全部任务。' : '添加作品链接，或在抖音网页点击 Sender 发送。'));
+        empty.append(node('span', 'empty-symbol', '↓'), node('strong', '', filtered ? '没有匹配的任务' : '还没有下载任务'), node('p', '', filtered ? '换个关键词，或查看全部任务。' : '添加作品链接，或在抖音网页点击抖音收藏库助手发送。'));
         const button = node('button', 'secondary', filtered ? '查看全部任务' : '添加下载'); button.type = 'button';
         button.addEventListener('click', () => { if (filtered) { filter = 'all'; query.value = ''; render(); } else byId('open-submit').click(); });
         empty.append(button); list.append(empty);
