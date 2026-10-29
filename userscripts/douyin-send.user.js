@@ -3,7 +3,7 @@
 // @name:zh      抖音收藏库助手
 // @name:zh-CN   抖音收藏库助手
 // @namespace    douyin-local-library
-// @version      1.9.0
+// @version      1.9.1
 // @description  识别当前作品与博主，查看更新状态，按需下载并设置追更周期。
 // @match        https://www.douyin.com/*
 // @match        https://douyin.com/*
@@ -12,6 +12,7 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_xmlhttpRequest
 // @grant        GM_cookie
+// @grant        unsafeWindow
 // @connect      *
 // @run-at       document-idle
 // ==/UserScript==
@@ -56,11 +57,26 @@
   function pageTargets(scope, page) {
     const standalone = scope?.matches('[data-e2e="video-detail"], [data-e2e="note-detail"]');
     const work = !standalone && scope?.querySelector('a[href*="/video/"], a[href*="/note/"]')?.href;
-    const author = scope?.querySelector('a[data-e2e="video-author-name"], a[data-e2e="video-avatar"]')
-      || scope?.querySelector('[data-e2e="user-info"] a[href*="/user/"]');
+    const author = [scope?.querySelector('a[data-e2e="video-author-name"], a[data-e2e="video-avatar"]'),
+      scope?.querySelector('[data-e2e="user-info"] a[href*="/user/"]')].find(a => a?.href && resolveTargets(a.href).author);
     const card = standalone ? null : scope?.matches('[data-e2e-vid], [data-e2e-aweme-id]') ? scope : scope?.querySelector('[data-e2e-vid], [data-e2e-aweme-id]');
     const activeId = card?.getAttribute('data-e2e-vid') || card?.getAttribute('data-e2e-aweme-id');
-    return { author, targets: resolveTargets(page, work, author?.href, activeId) };
+    const targets = resolveTargets(page, work, author?.href, activeId);
+    if (targets.detail && !author) targets.author = null;
+    return { author, targets };
+  }
+  function reactAuthor(scope, detail) {
+    if (!scope || !detail) return null;
+    const id = detail.split('/').pop(), start = scope.querySelector('[data-e2e="feed-video-nickname"]') || scope;
+    const key = Object.keys(start).find(k => k.startsWith('__reactFiber$'));
+    // shortcut: 直播头像无主页链接时依赖抖音组件数据，页面结构变化后需更新此定位。
+    for (let fiber = start[key], depth = 0; fiber && depth < 20; fiber = fiber.return, depth++) {
+      const work = fiber.memoizedProps?.awemeInfo;
+      if (work?.awemeId !== id) continue;
+      const secUid = work.authorInfo?.secUid;
+      if (typeof secUid === 'string' && /^[A-Za-z0-9_-]{6,128}$/.test(secUid)) return `https://www.douyin.com/user/${secUid}`;
+    }
+    return null;
   }
   function senderPosition(anchor, viewport, panelHeight) {
     const clamp = (value, low, high) => Math.max(low, Math.min(value, high));
@@ -72,7 +88,7 @@
       panelTop: clamp(top, 12, viewport.height - panelHeight - 12)};
   }
   function subscriptionState(authors,url) { const author=authors.find(a=>resolveTargets(a.url).author===url)||null;return {author,enabled:Boolean(author?.enabled),frequency:({4320:'three_days',10080:'weekly',43200:'monthly',129600:'quarterly',525600:'yearly'}[author?.interval_minutes]||'quarterly')}; }
-  if (typeof module !== 'undefined' && module.exports) { module.exports = { resolveTargets, normalizeServer, togglePanel, defaultKind, senderPosition, pageTargets, subscriptionState }; return; }
+  if (typeof module !== 'undefined' && module.exports) { module.exports = { resolveTargets, normalizeServer, togglePanel, defaultKind, senderPosition, pageTargets, reactAuthor, subscriptionState }; return; }
 
   function node(tag, className, text) {
     const value = document.createElement(tag); if (className) value.className = className;
@@ -157,9 +173,9 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
   const preference=node('select');for(const [value,text] of [['detail','突出当前作品'],['author','突出博主更新']]){const option=node('option','',text);option.value=value;preference.append(option);}preference.value=defaultKind(GM_getValue('library_default_kind','author'));
   function field(text,control){const label=node('label','',text);label.append(control);form.append(label);}
   field('网站地址',serverInput);field('管理员密钥',tokenInput);field('默认下载操作',preference);const save=node('button','','保存设置');save.type='submit';form.append(save);settings.append(summary,form);
-  const footer=node('div','footer');footer.append(node('small','','助手 1.9.0'),node('span','','下载后在媒体库查看进度'));
+  const footer=node('div','footer');footer.append(node('small','','助手 1.9.1'),node('span','','下载后在媒体库查看进度'));
   panel.append(header,downloads,status,settings,footer);shadow.append(style,panel,toggle);document.body.append(host);
-  let targets={detail:null,author:null},anchor=null,authors=null,history=null,loading=null,generation=0,dataRevision=0,viewRevision=0,busy=false,frequencyDirty=false,settingsOverride=false,currentName='',stateAttempted=false;
+  let targets={detail:null,author:null},anchor=null,hadRail=false,authors=null,history=null,loading=null,generation=0,dataRevision=0,viewRevision=0,busy=false,frequencyDirty=false,settingsOverride=false,currentName='',stateAttempted=false;
   const recent=new Set(),feedback=new Map();
   const server=()=>GM_getValue('library_server','');
   const configured=()=>Boolean(server()&&GM_getValue('library_token',''));
@@ -218,6 +234,11 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
     if(page.detail){const id=page.detail.split('/').pop(),item=document.querySelector(`[data-e2e-vid="${id}"], [data-e2e-aweme-id="${id}"]`);if(visible(item))scope=item.closest('[data-e2e="video-detail"], [data-e2e="note-detail"], [data-e2e="feed-active-video"]')||item;}
     if(!scope&&!profile)scope=feed;
     const current=allowed?pageTargets(scope,location.href):{author:null,targets:{detail:null,author:null}};
+    if(current.targets.detail&&(!current.targets.author||scope?.querySelector('a[href*="live.douyin.com/"]'))){
+      const id=current.targets.detail.split('/').pop(),pageDocument=typeof unsafeWindow==='undefined'?document:unsafeWindow.document;
+      const pageScope=pageDocument.querySelector(`[data-e2e-vid="${id}"], [data-e2e-aweme-id="${id}"]`)||scope;
+      current.targets.author=reactAuthor(pageScope,current.targets.detail)||current.targets.author;
+    }
     if(profile)current.targets.author=page.author;
     const changed=targets.detail!==current.targets.detail||targets.author!==current.targets.author;
     targets=current.targets;host.hidden=!settingsOverride&&(!allowed||!targets.detail&&!targets.author);
@@ -226,8 +247,14 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
     const named=[...(scope?.querySelectorAll('[data-e2e="user-info"] a[href*="/user/"]')||[])].find(a=>resolveTargets(a.href).author===targets.author&&a.textContent.trim());
     currentName=(profile?document.querySelector('h1')?.textContent:'')||named?.textContent||scope?.querySelector('[data-e2e="feed-video-nickname"]')?.textContent||current.author?.textContent||'';
     creator.textContent=currentName.trim()||'正在识别博主';contextLabel.textContent=profile?'· 博主页':'· 当前作品';
-    const rail=[...(scope?.querySelectorAll('[data-e2e="video-avatar"]')||[]),...(scope?.querySelectorAll('[data-e2e="user-info"] a[href*="/user/"]')||[])].find(el=>visible(el)&&(!targets.author||!el.href||resolveTargets(el.href).author===targets.author));
-    if(profile||!allowed)anchor=null;else if(rail)anchor=rail.getBoundingClientRect();
+    let rail=[...(scope?.querySelectorAll('[data-e2e="video-avatar"]')||[])].find(el=>visible(el)&&(!targets.author||!el.href||resolveTargets(el.href).author===targets.author));
+    if(!rail)for(const digg of scope?.querySelectorAll('[data-e2e="video-player-digg"]')||[]){
+      for(let n=digg.parentElement;n&&scope.contains(n)&&n.getBoundingClientRect().width<=140;n=n.parentElement){rail=[...n.querySelectorAll('a[href*="live.douyin.com"]')].find(visible);if(rail)break;}
+      if(rail)break;
+    }
+    if(profile||!allowed){anchor=null;hadRail=false;}
+    else if(rail){anchor=rail.getBoundingClientRect();hadRail=true;}
+    else if(!hadRail){rail=[...(scope?.querySelectorAll('[data-e2e="user-info"] a[href*="/user/"]')||[])].find(el=>visible(el)&&(!targets.author||resolveTargets(el.href).author===targets.author));if(rail)anchor=rail.getBoundingClientRect();}
     for(let n=rail?.parentElement;n&&scope.contains(n);n=n.parentElement){const r=n.getBoundingClientRect();if(r.width>140)break;if(anchor&&visible(n)&&n.querySelector('[data-e2e="video-player-digg"]'))anchor={left:anchor.left,width:anchor.width,top:r.top};}
     if(scope!==observedScope){layoutObserver.disconnect();if(scope)layoutObserver.observe(scope);observedScope=scope;}
     paint();position();if(!panel.hidden&&!settings.open)loadState().catch(()=>{});

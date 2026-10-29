@@ -118,7 +118,7 @@ assert.equal(moveGallery(1, 1, 3), 2);
 assert.equal(moveGallery(2, 1, 3), 2);
 assert.equal(moveGallery(0, 1, 0), 0);
 // Execute the Sender in a small browser stub, exercising the actual request and UI flow.
-function browser(url = subscribedURL, {feed = null, preview = null} = {}) {
+function browser(url = subscribedURL, {feed = null, preview = null, pageDocument = null} = {}) {
   const elements = [], requests = [], callbacks = {}, frame = [];
   function element(tag) {
     const listeners = {}, attrs = {};
@@ -143,7 +143,7 @@ function browser(url = subscribedURL, {feed = null, preview = null} = {}) {
     querySelector(selector){return selector==='h1'?{textContent:page.pathname.includes('someone_else')?'乙博主':'甲博主'}:null},
     querySelectorAll(selector){if(selector==='[data-e2e="feed-active-video"]')return feed?[feed]:[];if(selector==='[data-e2e="video-detail"], [data-e2e="note-detail"]')return preview?[preview]:[];return []},addEventListener(name,fn){callbacks['document:'+name]=fn}};
   const observer=class {constructor(fn){callbacks.mutation=fn}observe(){}disconnect(){}};
-  runInNewContext(readFileSync(script,'utf8'),{URL,document:doc,location:page,innerWidth:1200,innerHeight:800,
+  runInNewContext(readFileSync(script,'utf8'),{URL,document:doc,unsafeWindow:pageDocument?{document:pageDocument}:undefined,location:page,innerWidth:1200,innerHeight:800,
     GM_getValue(key,fallback){return storage[key]??fallback}, GM_setValue(key,value){storage[key]=value},
     GM_registerMenuCommand(){},GM_xmlhttpRequest(request){requests.push(request)},
     ResizeObserver:class{observe(){}disconnect(){}},MutationObserver:observer,
@@ -196,6 +196,29 @@ assert.equal(positioning.host.style.top,'144px','操作栏暂未绘制时保留�
 railRect={width:40,height:40,top:220,bottom:260,left:750};positioning.callbacks.detect();
 assert.equal(positioning.host.style.left,'748px','新操作栏绘制后跟随它的位置');
 assert.equal(positioning.host.style.top,'164px');
+const temporaryInfo={...feedAuthor,getBoundingClientRect:()=>({width:40,height:40,top:80,bottom:120,left:300})};
+const fallbackFeed={...changingFeed,querySelectorAll:s=>s==='[data-e2e="video-avatar"]'?[changingRail]:s==='[data-e2e="user-info"] a[href*="/user/"]'?[temporaryInfo]:[]};
+const stablePosition=browser('https://www.douyin.com/?recommend=1',{feed:fallbackFeed});
+railRect={width:0,height:0,top:0,bottom:0,left:0};stablePosition.callbacks.detect();
+assert.equal(stablePosition.host.style.left,'748px','侧栏暂时隐藏时不能跳到可见的作者信息栏');
+assert.equal(stablePosition.host.style.top,'164px');
+railRect={width:40,height:40,top:240,bottom:280,left:780};stablePosition.callbacks.detect();
+assert.equal(stablePosition.host.style.left,'778px','侧栏恢复后跟随新位置');
+assert.equal(stablePosition.host.style.top,'184px');
+stablePosition.go(subscribedURL);
+railRect={width:0,height:0,top:0,bottom:0,left:0};stablePosition.go('https://www.douyin.com/?recommend=1');
+assert.equal(stablePosition.host.style.left,'298px','离开作品页后重置侧栏状态，允许首次使用作者信息栏');
+let liveLeft=840, railTop=160;
+const liveAvatar={href:'https://live.douyin.com/123',getBoundingClientRect:()=>({width:40,height:40,top:railTop+40,bottom:railTop+80,left:liveLeft})};
+const liveRail={parentElement:null,getBoundingClientRect:()=>({width:60,height:300,top:railTop,bottom:railTop+300,left:liveLeft-10}),querySelector:s=>s==='[data-e2e="video-player-digg"]'?digg:null,querySelectorAll:s=>s==='a[href*="live.douyin.com"]'?[liveAvatar]:[]};
+const digg={parentElement:liveRail};liveAvatar.parentElement=liveRail;
+const liveFeed={...feed,contains:n=>n===liveRail,querySelectorAll:s=>s==='[data-e2e="video-player-digg"]'?[digg]:[]};
+const livePosition=browser('https://www.douyin.com/?recommend=1',{feed:liveFeed});
+assert.equal(livePosition.host.style.left,'838px','直播头像可作为操作栏定位，不要求作品作者链接');
+assert.equal(livePosition.host.style.top,'104px');
+liveLeft=620;railTop=120;livePosition.callbacks.detect();
+assert.equal(livePosition.host.style.left,'618px','评论布局变化时跟随操作栏');
+assert.equal(livePosition.host.style.top,'64px');
 positioning.go(subscribedURL);
 assert.equal(positioning.host.style.left,'1136px','进入博主页时不能沿用原视频的位置');
 const recommendation=browser('https://www.douyin.com/?recommend=1',{feed});
@@ -434,4 +457,26 @@ detail.find('下载当前作品').click();
 const detailTask=request(detail,'POST','/api/tasks');
 assert.equal(body(detailTask).kind,'detail');
 assert.equal(body(detailTask).link,`https://www.douyin.com/video/${sample}`);
-console.log('PASS: 作品/作者识别、订阅与提交反馈、媒体凭据边界、视图暂停、图集边界');
+let liveWorkId=feedId;
+const liveNode={textContent:'直播博主',__reactFiber$test:{memoizedProps:{awemeInfo:{awemeId:feedId,authorInfo:{secUid:'MS4wLjABAAAA_live_author'}}}}};
+const liveCard={...feed,getAttribute:()=>liveWorkId,querySelector:s=>s==='[data-e2e="feed-video-nickname"]'?{textContent:'直播博主'}:null,querySelectorAll:()=>[]};
+const liveBrowser=()=>browser('https://www.douyin.com/?recommend=1',{feed:liveCard,pageDocument:{querySelector:()=>({querySelector:()=>liveNode})}});
+const liveAuthor='https://www.douyin.com/user/MS4wLjABAAAA_live_author';
+const liveDownload=liveBrowser();activate(liveDownload);
+liveDownload.respond(request(liveDownload,'GET','/api/authors'),[]);liveDownload.respond(request(liveDownload,'GET','/api/tasks'),[]);await tick();
+assert.equal(liveDownload.find('下载全部作品').disabled,false,'直播头像无主页链接时仍可下载作者作品');
+liveDownload.find('下载全部作品').click();
+assert.equal(body(request(liveDownload,'POST','/api/tasks')).link,liveAuthor,'detect通过页面环境读取当前作品作者后提交主页，不能发直播间');
+liveDownload.respond(request(liveDownload,'POST','/api/tasks'),{id:'live-once'});await tick();
+const livePlan=liveBrowser();activate(livePlan);
+livePlan.respond(request(livePlan,'GET','/api/authors'),[]);livePlan.respond(request(livePlan,'GET','/api/tasks'),[]);await tick();
+select(livePlan,'weekly');livePlan.find('下载博主并订阅').click();
+assert.equal(body(request(livePlan,'POST','/api/authors')).url,liveAuthor);
+assert.equal(body(request(livePlan,'POST','/api/authors')).frequency,'weekly');
+livePlan.respond(request(livePlan,'POST','/api/authors'),{id:'live-author',url:liveAuthor,enabled:true,interval_minutes:10080});await tick();
+assert.ok(request(livePlan,'POST','/api/authors/live-author/check'),'直播博主订阅保存后仍会提交一次更新');
+livePlan.respond(request(livePlan,'POST','/api/authors/live-author/check'),{id:'live-weekly'});await tick();
+liveWorkId=sample;liveDownload.callbacks.detect();
+assert.equal(liveDownload.find('下载全部作品').disabled,true,'切到另一作品时不能复用旧React作者');
+assert.equal(liveDownload.find('下载博主一次').disabled,true);
+console.log('PASS: 作品/作者识别、直播博主下载与订阅、订阅与提交反馈、媒体凭据边界、视图暂停、图集边界');
