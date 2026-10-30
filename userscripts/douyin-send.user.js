@@ -3,7 +3,7 @@
 // @name:zh      抖音收藏库助手
 // @name:zh-CN   抖音收藏库助手
 // @namespace    douyin-local-library
-// @version      1.10.1
+// @version      1.10.2
 // @description  识别当前作品与博主，查看更新状态，按需下载并设置追更周期。
 // @match        https://www.douyin.com/*
 // @match        https://douyin.com/*
@@ -88,21 +88,6 @@
       panelTop: clamp(top, 12, viewport.height - panelHeight - 12)};
   }
   function subscriptionState(authors,url) { const author=authors.find(a=>resolveTargets(a.url).author===url)||null;return {author,enabled:Boolean(author?.enabled),frequency:({4320:'three_days',10080:'weekly',43200:'monthly',129600:'quarterly',525600:'yearly'}[author?.interval_minutes]||'quarterly')}; }
-  function profileCount(scripts, author) {
-    const url=resolveTargets(author).author;if(!url)return null;
-    // shortcut: 读取抖音主页已有的资料数据，页面序列化结构变化时需更新此解析。
-    for(const script of scripts){
-      const call=/^self\.__pace_f\.push\((\[.*\])\);?$/s.exec(script.trim());if(!call)continue;
-      try{
-        const chunk=JSON.parse(call[1])[1];if(typeof chunk!=='string')continue;
-        const props=JSON.parse(chunk.slice(chunk.indexOf(':')+1))?.[3];
-        if(props?.uid!==url.split('/').pop()||props.statusCode!==0||!Object.hasOwn(props,'post'))continue;
-        const data=props.user,count=data?.user?.awemeCount;
-        if(data?.statusCode===0&&data.user?.secUid===url.split('/').pop()&&Number.isSafeInteger(count)&&count>=0)return count;
-      }catch{}
-    }
-    return null;
-  }
   function pageProfileCount(doc, page, author) {
     const url=resolveTargets(author).author;if(!url||resolveTargets(page).author!==url)return null;
     for(const tab of doc?.querySelectorAll?.('[data-e2e="user-tab-count"]')||[]){
@@ -114,7 +99,7 @@
     }
     return null;
   }
-  if (typeof module !== 'undefined' && module.exports) { module.exports = { resolveTargets, normalizeServer, togglePanel, defaultKind, senderPosition, pageTargets, reactAuthor, subscriptionState, profileCount, pageProfileCount }; return; }
+  if (typeof module !== 'undefined' && module.exports) { module.exports = { resolveTargets, normalizeServer, togglePanel, defaultKind, senderPosition, pageTargets, reactAuthor, subscriptionState, pageProfileCount }; return; }
 
   function node(tag, className, text) {
     const value = document.createElement(tag); if (className) value.className = className;
@@ -200,7 +185,7 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
   const preference=node('select');for(const [value,text] of [['detail','突出当前作品'],['author','突出博主更新']]){const option=node('option','',text);option.value=value;preference.append(option);}preference.value=defaultKind(GM_getValue('library_default_kind','author'));
   function field(text,control){const label=node('label','',text);label.append(control);form.append(label);}
   field('网站地址',serverInput);field('管理员密钥',tokenInput);field('默认下载操作',preference);const save=node('button','','保存设置');save.type='submit';form.append(save);settings.append(summary,form);
-  const footer=node('div','footer');footer.append(node('small','','助手 1.10.1'),node('span','','下载后在媒体库查看进度'));
+  const footer=node('div','footer');footer.append(node('small','','助手 1.10.2'),node('span','','下载后在媒体库查看进度'));
   panel.append(header,downloads,status,settings,footer);shadow.append(style,panel,toggle);document.body.append(host);
   let targets={detail:null,author:null},anchor=null,hadRail=false,authors=null,history=null,loading=null,generation=0,dataRevision=0,viewRevision=0,busy=false,frequencyDirty=false,settingsOverride=false,currentName='',stateAttempted=false;
   const recent=new Set(),feedback=new Map(),counts=new Map();
@@ -209,26 +194,26 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
   const contextKey=()=>JSON.stringify([server(),targets.author,targets.detail]);
   const actionKey=(action,link,period='')=>JSON.stringify([server(),action,link,period]);
   function message(text,error=false){status.textContent=text;status.classList.toggle('error',error);}
-  function request(method,path,body,connection){return new Promise((resolve,reject)=>{
+  function request(method,path,body,connection,timeout){return new Promise((resolve,reject)=>{
     let origin;try{origin=normalizeServer(connection?.server??server());}catch{reject(new Error('请先配置网站地址。'));return;}
-    GM_xmlhttpRequest({method,url:origin+path,timeout:method==='GET'?15000:20000,headers:{'Content-Type':'application/json',Authorization:`Bearer ${connection?.token??GM_getValue('library_token','')}`},...(body===undefined?{}:{data:JSON.stringify(body)}),
+    GM_xmlhttpRequest({method,url:origin+path,timeout:timeout??(method==='GET'?15000:20000),headers:{'Content-Type':'application/json',Authorization:`Bearer ${connection?.token??GM_getValue('library_token','')}`},...(body===undefined?{}:{data:JSON.stringify(body)}),
       onload(response){let value;try{value=JSON.parse(response.responseText);}catch{reject(new Error('网站返回异常，请检查连接。'));return;}if(response.status>=200&&response.status<300)resolve(value);else reject(new Error(typeof value.detail==='string'?value.detail:`请求失败（${response.status}）`));},
       onerror(){reject(new Error('网站不可达，请检查 NAS 连接。'));},ontimeout(){reject(new Error('网站响应超时，请先查看任务后重试。'));},onabort(){reject(new Error('请求已中止，可以重新尝试。'));}});
   });}
   function authorState(){return authors?subscriptionState(authors,targets.author):null;}
-  function paintCount(){const item=counts.get(targets.author);workCount.textContent=item?.pending?'· 数量读取中…':Number.isSafeInteger(item?.value)?`· 共 ${item.value.toLocaleString('zh-CN')} 个作品`:item?.verification?'· 数量需验证':'· 数量暂不可用';workCount.title=item?.verification?'请打开该博主页完成抖音验证，再点击刷新。':'抖音主页显示的作品数；实际可下载数量可能不同。';}
+  function paintCount(){const item=counts.get(targets.author);workCount.textContent=item?.pending?'· 数量读取中…':Number.isSafeInteger(item?.value)?`· 共 ${item.value.toLocaleString('zh-CN')} 个作品`:'· 数量暂不可用';workCount.title='抖音资料中的作品数，点击刷新可重新核对；实际可下载数量可能不同。';}
   async function loadCount(force=false){
     const link=targets.author;
     if(panel.hidden||settings.open||!link)return;
     const pageWindow=typeof unsafeWindow==='undefined'?globalThis:unsafeWindow;
     const local=pageProfileCount(pageWindow.document,location.href,link);
     if(local!==null){counts.set(link,{pending:false,value:local});paintCount();return;}
-    if(resolveTargets(location.href).author===link){counts.set(link,{pending:false,value:null,verification:pageWindow.document?.title==='验证码中间页'});paintCount();return;}
+    if(!configured())return;
     if(!force&&counts.has(link))return;
     const item={pending:true,value:null};counts.set(link,item);paintCount();
     try{
-      const response=await pageWindow.fetch(new URL(link).pathname,{credentials:'same-origin',signal:AbortSignal.timeout(10000)});
-      if(response.ok){const doc=new DOMParser().parseFromString(await response.text(),'text/html');item.verification=doc.title==='验证码中间页';if(!item.verification)item.value=profileCount([...doc.scripts].map(s=>s.textContent),link);}
+      const secUid=link.split('/').pop(),response=await request('GET','/api/author-count?sec_uid='+encodeURIComponent(secUid),undefined,undefined,50000);
+      if(response?.sec_uid===secUid&&Number.isSafeInteger(response.count)&&response.count>=0)item.value=response.count;
     }catch{}
     finally{item.pending=false;if(counts.get(link)===item&&targets.author===link)paintCount();}
   }
@@ -272,7 +257,8 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
       const card=element.matches('[data-e2e-vid], [data-e2e-aweme-id]')?element:element.querySelector('[data-e2e-vid], [data-e2e-aweme-id]');
       return /^\d{19}$/.test(card?.getAttribute('data-e2e-vid')||card?.getAttribute('data-e2e-aweme-id')||'');
     });
-    const allowed=Boolean(profile||page.detail||feed);
+    const keepPanel=!panel.hidden&&location.pathname==='/'&&new URL(location.href).searchParams.get('recommend')==='1';
+    const allowed=Boolean(profile||page.detail||feed||keepPanel);
     const modal=new URL(location.href).searchParams.get('modal_id');
     let scope=profile?null:page.detail?(modal?(dialog?.querySelector('[data-e2e="video-detail"], [data-e2e="note-detail"]')||details[details.length-1]):details[0]):feed;
     if(page.detail){const id=page.detail.split('/').pop(),item=document.querySelector(`[data-e2e-vid="${id}"], [data-e2e-aweme-id="${id}"]`);if(visible(item))scope=item.closest('[data-e2e="video-detail"], [data-e2e="note-detail"], [data-e2e="feed-active-video"]')||item;}
@@ -285,7 +271,7 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
     }
     if(profile)current.targets.author=page.author;
     const changed=targets.detail!==current.targets.detail||targets.author!==current.targets.author;
-    targets=current.targets;host.hidden=!settingsOverride&&(!allowed||!targets.detail&&!targets.author);
+    targets=current.targets;host.hidden=!settingsOverride&&(!allowed||!targets.detail&&!targets.author&&!keepPanel);
     if(host.hidden&&!panel.hidden)togglePanel(panel,toggle);
     if(changed){viewRevision++;frequencyDirty=false;message('');}
     const named=[...(scope?.querySelectorAll('[data-e2e="user-info"] a[href*="/user/"]')||[])].find(a=>resolveTargets(a.href).author===targets.author&&a.textContent.trim());

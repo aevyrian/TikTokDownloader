@@ -2,6 +2,7 @@ import asyncio
 import re
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 
@@ -101,6 +102,30 @@ class Core:
             if app.params_task:
                 await asyncio.to_thread(app.params_task.join, 5)
         self.parser = None
+
+    async def author_count(self, sec_uid, cookie):
+        try:
+            if str(self.source) not in sys.path:
+                sys.path.insert(0, str(self.source))
+            from curl_cffi.requests import AsyncSession
+            from src.custom import DATA_HEADERS, IMPERSONATE, USERAGENT
+            from src.encrypt import DouYinParams
+            from src.interface.user import User
+
+            class Silent:
+                def __getattr__(self, name):
+                    return lambda *args, **kwargs: None
+
+            async with AsyncSession(timeout=8, impersonate=IMPERSONATE, verify=True, allow_redirects=False) as client:
+                params = SimpleNamespace(headers=DATA_HEADERS, logger=Silent(), console=Silent(), douyin_params=DouYinParams(),
+                                         max_retry=0, timeout=8, client=client, impersonate=IMPERSONATE, user_agent=USERAGENT)
+                user = await User(params, cookie=cookie, sec_user_id=sec_uid).run()
+            count = user.get('aweme_count') if isinstance(user, dict) else None
+            if not isinstance(user, dict) or user.get('sec_uid') != sec_uid or type(count) is not int or not 0 <= count <= 2**53 - 1:
+                raise ValueError
+            return count
+        except Exception:
+            raise RuntimeError('无法获取博主作品数量') from None
 
     async def parse(self, link, kind, earliest=None):
         if not self.ready:

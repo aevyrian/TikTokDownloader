@@ -23,7 +23,7 @@ from .playback import PlaybackCache
 from .cookie_sync import CookieSync
 
 
-VERSION = "1.3.5"
+VERSION = "1.3.6"
 BASE = Path(__file__).resolve().parent
 
 
@@ -342,6 +342,8 @@ def make_app(data_dir=None, media_dir=None, token=None, core=None, legacy_dir=No
     service = JobService(store, core, media_dir, legacy.root)
     playback = PlaybackCache(data_dir / 'playback-cache')
     cookie_sync = CookieSync(store, service)
+    count_cache, count_requests = {}, {}
+    count_limit = asyncio.Semaphore(2)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -353,6 +355,10 @@ def make_app(data_dir=None, media_dir=None, token=None, core=None, legacy_dir=No
         try:
             yield
         finally:
+            pending_counts = list(count_requests.values())
+            for task in pending_counts:
+                task.cancel()
+            await asyncio.gather(*pending_counts, return_exceptions=True)
             await cookie_sync.close()
             await playback.close()
             await legacy.close()
@@ -584,6 +590,39 @@ def make_app(data_dir=None, media_dir=None, token=None, core=None, legacy_dir=No
     @app.get("/api/authors", dependencies=[Depends(authorize)])
     async def authors():
         return store.authors()
+
+    @app.get('/api/author-count', dependencies=[Depends(authorize)])
+    async def author_count(sec_uid: str = Query(pattern=r'^[A-Za-z0-9_-]{1,128}$')):
+        cookie = store.setting('cookie', '') or ''
+        headers = {'Cache-Control': 'no-store'}
+        if not cookie:
+            return JSONResponse({'detail': '无法获取博主作品数量'}, status_code=503, headers=headers)
+        key = (hashlib.sha256(cookie.encode()).hexdigest(), sec_uid)
+        cached = count_cache.get(key)
+        if cached and cached[0] > time.monotonic():
+            count = cached[1]
+        else:
+            async def fetch_count():
+                try:
+                    try:
+                        async with asyncio.timeout(45):
+                            async with count_limit:
+                                value = await core.author_count(sec_uid, cookie)
+                    except Exception:
+                        value = None
+                    count_cache[key] = (time.monotonic() + (30 if value is None else 300), value)
+                    while len(count_cache) > 128:
+                        count_cache.pop(next(iter(count_cache)))
+                    return value
+                finally:
+                    count_requests.pop(key, None)
+
+            if key not in count_requests:
+                count_requests[key] = asyncio.create_task(fetch_count())
+            count = await asyncio.shield(count_requests[key])
+        if count is None or store.setting('cookie', '') != cookie:
+            return JSONResponse({'detail': '无法获取博主作品数量'}, status_code=503, headers=headers)
+        return JSONResponse({'sec_uid': sec_uid, 'count': count}, headers=headers)
 
     @app.post("/api/authors", dependencies=[Depends(authorize)])
     async def add_author(body: AuthorInput):
