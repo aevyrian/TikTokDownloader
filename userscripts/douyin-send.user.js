@@ -3,7 +3,7 @@
 // @name:zh      抖音收藏库助手
 // @name:zh-CN   抖音收藏库助手
 // @namespace    douyin-local-library
-// @version      1.10.0
+// @version      1.10.1
 // @description  识别当前作品与博主，查看更新状态，按需下载并设置追更周期。
 // @match        https://www.douyin.com/*
 // @match        https://douyin.com/*
@@ -103,7 +103,18 @@
     }
     return null;
   }
-  if (typeof module !== 'undefined' && module.exports) { module.exports = { resolveTargets, normalizeServer, togglePanel, defaultKind, senderPosition, pageTargets, reactAuthor, subscriptionState, profileCount }; return; }
+  function pageProfileCount(doc, page, author) {
+    const url=resolveTargets(author).author;if(!url||resolveTargets(page).author!==url)return null;
+    for(const tab of doc?.querySelectorAll?.('[data-e2e="user-tab-count"]')||[]){
+      const key=Object.keys(tab).find(k=>k.startsWith('__reactFiber$'));
+      for(let fiber=tab[key],depth=0;fiber&&depth<20;fiber=fiber.return,depth++){
+        const props=fiber.memoizedProps,user=props?.userInfo;
+        if(Object.hasOwn(props||{},'currentTab')&&user?.secUid===url.split('/').pop()&&Number.isSafeInteger(user.awemeCount)&&user.awemeCount>=0)return user.awemeCount;
+      }
+    }
+    return null;
+  }
+  if (typeof module !== 'undefined' && module.exports) { module.exports = { resolveTargets, normalizeServer, togglePanel, defaultKind, senderPosition, pageTargets, reactAuthor, subscriptionState, profileCount, pageProfileCount }; return; }
 
   function node(tag, className, text) {
     const value = document.createElement(tag); if (className) value.className = className;
@@ -189,7 +200,7 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
   const preference=node('select');for(const [value,text] of [['detail','突出当前作品'],['author','突出博主更新']]){const option=node('option','',text);option.value=value;preference.append(option);}preference.value=defaultKind(GM_getValue('library_default_kind','author'));
   function field(text,control){const label=node('label','',text);label.append(control);form.append(label);}
   field('网站地址',serverInput);field('管理员密钥',tokenInput);field('默认下载操作',preference);const save=node('button','','保存设置');save.type='submit';form.append(save);settings.append(summary,form);
-  const footer=node('div','footer');footer.append(node('small','','助手 1.10.0'),node('span','','下载后在媒体库查看进度'));
+  const footer=node('div','footer');footer.append(node('small','','助手 1.10.1'),node('span','','下载后在媒体库查看进度'));
   panel.append(header,downloads,status,settings,footer);shadow.append(style,panel,toggle);document.body.append(host);
   let targets={detail:null,author:null},anchor=null,hadRail=false,authors=null,history=null,loading=null,generation=0,dataRevision=0,viewRevision=0,busy=false,frequencyDirty=false,settingsOverride=false,currentName='',stateAttempted=false;
   const recent=new Set(),feedback=new Map(),counts=new Map();
@@ -205,15 +216,19 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
       onerror(){reject(new Error('网站不可达，请检查 NAS 连接。'));},ontimeout(){reject(new Error('网站响应超时，请先查看任务后重试。'));},onabort(){reject(new Error('请求已中止，可以重新尝试。'));}});
   });}
   function authorState(){return authors?subscriptionState(authors,targets.author):null;}
-  function paintCount(){const item=counts.get(targets.author);workCount.textContent=item?.pending?'· 数量读取中…':Number.isSafeInteger(item?.value)?`· 共 ${item.value.toLocaleString('zh-CN')} 个作品`:'· 数量暂不可用';}
+  function paintCount(){const item=counts.get(targets.author);workCount.textContent=item?.pending?'· 数量读取中…':Number.isSafeInteger(item?.value)?`· 共 ${item.value.toLocaleString('zh-CN')} 个作品`:item?.verification?'· 数量需验证':'· 数量暂不可用';workCount.title=item?.verification?'请打开该博主页完成抖音验证，再点击刷新。':'抖音主页显示的作品数；实际可下载数量可能不同。';}
   async function loadCount(force=false){
     const link=targets.author;
-    if(panel.hidden||settings.open||!link||!force&&counts.has(link))return;
+    if(panel.hidden||settings.open||!link)return;
+    const pageWindow=typeof unsafeWindow==='undefined'?globalThis:unsafeWindow;
+    const local=pageProfileCount(pageWindow.document,location.href,link);
+    if(local!==null){counts.set(link,{pending:false,value:local});paintCount();return;}
+    if(resolveTargets(location.href).author===link){counts.set(link,{pending:false,value:null,verification:pageWindow.document?.title==='验证码中间页'});paintCount();return;}
+    if(!force&&counts.has(link))return;
     const item={pending:true,value:null};counts.set(link,item);paintCount();
     try{
-      const pageWindow=typeof unsafeWindow==='undefined'?globalThis:unsafeWindow;
       const response=await pageWindow.fetch(new URL(link).pathname,{credentials:'same-origin',signal:AbortSignal.timeout(10000)});
-      if(response.ok){const doc=new DOMParser().parseFromString(await response.text(),'text/html');item.value=profileCount([...doc.scripts].map(s=>s.textContent),link);}
+      if(response.ok){const doc=new DOMParser().parseFromString(await response.text(),'text/html');item.verification=doc.title==='验证码中间页';if(!item.verification)item.value=profileCount([...doc.scripts].map(s=>s.textContent),link);}
     }catch{}
     finally{item.pending=false;if(counts.get(link)===item&&targets.author===link)paintCount();}
   }
