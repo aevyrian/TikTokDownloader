@@ -118,8 +118,9 @@ assert.equal(moveGallery(1, 1, 3), 2);
 assert.equal(moveGallery(2, 1, 3), 2);
 assert.equal(moveGallery(0, 1, 0), 0);
 // Execute the Sender in a small browser stub, exercising the actual request and UI flow.
-function browser(url = subscribedURL, {feed = null, preview = null, pageDocument = null} = {}) {
-  const elements = [], requests = [], callbacks = {}, frame = [];
+function browser(url = subscribedURL, {feed = null, preview = null, pageDocument = null, profileFetch = () => Promise.reject(new Error('profile unavailable'))} = {}) {
+  const elements = [], requests = [], profileRequests = [], callbacks = {}, frame = [];
+  const fetchProfile=(url,options)=>{profileRequests.push({url,options});return profileFetch(url,options)};
   function element(tag) {
     const listeners = {}, attrs = {};
     const el = {tag, style:{}, dataset:{}, classList:{toggle(){},add(){},remove(){}}, children:[], hidden:false, open:false,
@@ -143,10 +144,10 @@ function browser(url = subscribedURL, {feed = null, preview = null, pageDocument
     querySelector(selector){return selector==='h1'?{textContent:page.pathname.includes('someone_else')?'乙博主':'甲博主'}:null},
     querySelectorAll(selector){if(selector==='[data-e2e="feed-active-video"]')return feed?[feed]:[];if(selector==='[data-e2e="video-detail"], [data-e2e="note-detail"]')return preview?[preview]:[];return []},addEventListener(name,fn){callbacks['document:'+name]=fn}};
   const observer=class {constructor(fn){callbacks.mutation=fn}observe(){}disconnect(){}};
-  runInNewContext(readFileSync(script,'utf8'),{URL,document:doc,unsafeWindow:pageDocument?{document:pageDocument}:undefined,location:page,innerWidth:1200,innerHeight:800,
+  runInNewContext(readFileSync(script,'utf8'),{URL,document:doc,unsafeWindow:pageDocument?{document:pageDocument,fetch:fetchProfile}:undefined,fetch:fetchProfile,AbortSignal,location:page,innerWidth:1200,innerHeight:800,
     GM_getValue(key,fallback){return storage[key]??fallback}, GM_setValue(key,value){storage[key]=value},
     GM_registerMenuCommand(){},GM_xmlhttpRequest(request){requests.push(request)},
-    ResizeObserver:class{observe(){}disconnect(){}},MutationObserver:observer,
+    DOMParser:class{parseFromString(text){return {scripts:[{textContent:text}]}}},ResizeObserver:class{observe(){}disconnect(){}},MutationObserver:observer,
     addEventListener(name,fn){callbacks[name]=fn},
     requestAnimationFrame(fn){frame.push(fn);return frame.length},cancelAnimationFrame(){},
     setInterval(fn){callbacks.detect=fn},setTimeout(fn){frame.push(fn);return frame.length},clearTimeout(){}});
@@ -154,7 +155,7 @@ function browser(url = subscribedURL, {feed = null, preview = null, pageDocument
   const byClass=value=>elements.find(el=>el.className?.split(/\s+/).includes(value));
   function go(next){page.href=next;callbacks.detect();while(frame.length)frame.shift()()}
   function respond(request,data,status=200){assert.ok(request,'预期请求不存在');request.onload({status,responseText:JSON.stringify(data)})}
-  return {elements,requests,callbacks,frame,storage,page,find,byClass,go,respond,
+  return {elements,requests,profileRequests,callbacks,frame,storage,page,find,byClass,go,respond,
     host:elements.find(el=>el.id==='douyin-library-sender')};
 }
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
@@ -479,4 +480,29 @@ livePlan.respond(request(livePlan,'POST','/api/authors/live-author/check'),{id:'
 liveWorkId=sample;liveDownload.callbacks.detect();
 assert.equal(liveDownload.find('下载全部作品').disabled,true,'切到另一作品时不能复用旧React作者');
 assert.equal(liveDownload.find('下载博主一次').disabled,true);
-console.log('PASS: 作品/作者识别、直播博主下载与订阅、订阅与提交反馈、媒体凭据边界、视图暂停、图集边界');
+const profileReply=(author,count)=>({ok:true,text:async()=>`self.__pace_f.push(${JSON.stringify([1,'8:'+JSON.stringify(['$','$Lprofile',null,{uid:author.split('/').pop(),statusCode:0,post:{},user:{statusCode:0,user:{secUid:author.split('/').pop(),awemeCount:count}}}])])})`});
+const counts=browser(subscribedURL,{profileFetch:async()=>profileReply(subscribedURL,1234)});
+assert.equal(counts.profileRequests.length,0,'面板关闭时不查询作品数量');activate(counts);await tick();
+assert.equal(counts.byClass('work-count').textContent,'· 共 1,234 个作品');
+assert.equal(counts.profileRequests.length,1);
+assert.equal(new URL(counts.profileRequests[0].url,'https://www.douyin.com').origin,'https://www.douyin.com');
+assert.equal(counts.profileRequests[0].options.credentials,'same-origin');
+assert.equal(counts.profileRequests[0].options.headers,undefined,'作品数请求不能附带收藏库管理员密钥');
+counts.callbacks.detect();counts.callbacks.detect();await tick();assert.equal(counts.profileRequests.length,1,'重复检测复用当前博主数量');
+const pendingProfiles=[];
+const switching=browser(subscribedURL,{profileFetch:()=>new Promise(resolve=>pendingProfiles.push(resolve))});activate(switching);
+switching.go(authorB);assert.equal(switching.byClass('work-count').textContent,'· 数量读取中…','换作者立即清除前一位数量');
+pendingProfiles[0](profileReply(subscribedURL,999));await tick();assert.equal(switching.byClass('work-count').textContent,'· 数量读取中…','前一博主的迟到响应不能覆盖当前博主');
+pendingProfiles[1](profileReply(authorB,47));await tick();assert.equal(switching.byClass('work-count').textContent,'· 共 47 个作品');
+switching.go(subscribedURL);assert.equal(switching.byClass('work-count').textContent,'· 共 999 个作品','同次打开切回作者复用数量');
+const unavailable=browser(subscribedURL);activate(unavailable);await tick();
+assert.equal(unavailable.byClass('work-count').textContent,'· 数量暂不可用');
+assert.equal(unavailable.find('下载全部作品').disabled,false,'数量读取失败不能阻止下载');
+const zero=browser(subscribedURL,{profileFetch:async()=>profileReply(subscribedURL,0)});activate(zero);await tick();
+assert.equal(zero.byClass('work-count').textContent,'· 共 0 个作品','资料明确返回零作品可显示0');
+const refreshReplies=[],refreshedCount=browser(subscribedURL,{profileFetch:()=>new Promise(resolve=>refreshReplies.push(resolve))});activate(refreshedCount);
+refreshedCount.respond(request(refreshedCount,'GET','/api/authors'),[]);refreshedCount.respond(request(refreshedCount,'GET','/api/tasks'),[]);await tick();
+refreshedCount.byClass('refresh-state').click();assert.equal(refreshedCount.profileRequests.length,2,'显式刷新会重查作品数');
+refreshReplies[1](profileReply(subscribedURL,48));await tick();refreshReplies[0](profileReply(subscribedURL,47));await tick();
+assert.equal(refreshedCount.byClass('work-count').textContent,'· 共 48 个作品','同一作者的旧请求不能覆盖刷新后的新数量');
+console.log('PASS: 作品/作者识别、直播博主下载与订阅、作品总数与切换隔离、订阅与提交反馈、媒体凭据边界、视图暂停、图集边界');

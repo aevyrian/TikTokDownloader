@@ -3,7 +3,7 @@
 // @name:zh      抖音收藏库助手
 // @name:zh-CN   抖音收藏库助手
 // @namespace    douyin-local-library
-// @version      1.9.1
+// @version      1.10.0
 // @description  识别当前作品与博主，查看更新状态，按需下载并设置追更周期。
 // @match        https://www.douyin.com/*
 // @match        https://douyin.com/*
@@ -88,7 +88,22 @@
       panelTop: clamp(top, 12, viewport.height - panelHeight - 12)};
   }
   function subscriptionState(authors,url) { const author=authors.find(a=>resolveTargets(a.url).author===url)||null;return {author,enabled:Boolean(author?.enabled),frequency:({4320:'three_days',10080:'weekly',43200:'monthly',129600:'quarterly',525600:'yearly'}[author?.interval_minutes]||'quarterly')}; }
-  if (typeof module !== 'undefined' && module.exports) { module.exports = { resolveTargets, normalizeServer, togglePanel, defaultKind, senderPosition, pageTargets, reactAuthor, subscriptionState }; return; }
+  function profileCount(scripts, author) {
+    const url=resolveTargets(author).author;if(!url)return null;
+    // shortcut: 读取抖音主页已有的资料数据，页面序列化结构变化时需更新此解析。
+    for(const script of scripts){
+      const call=/^self\.__pace_f\.push\((\[.*\])\);?$/s.exec(script.trim());if(!call)continue;
+      try{
+        const chunk=JSON.parse(call[1])[1];if(typeof chunk!=='string')continue;
+        const props=JSON.parse(chunk.slice(chunk.indexOf(':')+1))?.[3];
+        if(props?.uid!==url.split('/').pop()||props.statusCode!==0||!Object.hasOwn(props,'post'))continue;
+        const data=props.user,count=data?.user?.awemeCount;
+        if(data?.statusCode===0&&data.user?.secUid===url.split('/').pop()&&Number.isSafeInteger(count)&&count>=0)return count;
+      }catch{}
+    }
+    return null;
+  }
+  if (typeof module !== 'undefined' && module.exports) { module.exports = { resolveTargets, normalizeServer, togglePanel, defaultKind, senderPosition, pageTargets, reactAuthor, subscriptionState, profileCount }; return; }
 
   function node(tag, className, text) {
     const value = document.createElement(tag); if (className) value.className = className;
@@ -140,7 +155,7 @@ section{position:fixed;width:304px;padding:17px;background:#24252bf7;border:1px 
 header,.identity,.status-heading,.status-times,.quick-actions,.footer{display:flex;align-items:center;gap:8px}header{justify-content:space-between;margin-bottom:13px}header strong{font-size:14px}header small{font-size:10px;color:#afb0bb;margin-left:8px}
 button,input,select{font:inherit;color:inherit}button,a,input,select,summary{outline-offset:3px}button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid #ff8ba5}button{cursor:pointer;border:1px solid #ffffff1c;border-radius:9px;background:#ffffff06;padding:9px 11px;text-align:center}button:hover{background:#ffffff10}button:disabled{cursor:default;opacity:.48}
 .close{width:28px;height:28px;padding:0;font-size:22px;line-height:1;border:0;background:transparent;color:#b9bac5}.toggle{display:grid;place-items:center;width:44px;height:44px;padding:0;border-radius:11px;color:#fff;background:rgba(0,0,0,.3);border-color:rgba(255,255,255,.12);box-shadow:none}.toggle:hover{background:rgba(0,0,0,.3);border-color:#ffffff38}.toggle[aria-expanded=true]{color:#fff;background:rgba(0,0,0,.3);border-color:#ffffff40}.toggle svg{pointer-events:none;filter:drop-shadow(0 0 2.5px #0000004d)}
-.identity{margin-bottom:12px;min-width:0}.creator{font-size:14px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.context-label{flex:none;font-size:10px;color:#aaaab6}.creator-status{padding:12px;border:1px solid #ffffff1d;border-radius:10px;background:#ffffff04;margin-bottom:12px;transition:background .15s,border-color .15s}.creator-status[data-state=submitted]{background:#ff507716;border-color:#ff78976b}.status-heading{justify-content:space-between;margin-bottom:9px}.subscription-state{font-weight:600;font-size:12px}.subscription-state:before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:7px;background:#9699ad}.creator-status[data-enabled=true] .subscription-state:before{background:#ff8ba5}.refresh-state{padding:0;background:transparent;border:0;font-size:10px;color:#c5c6d1}
+.identity{margin-bottom:12px;min-width:0}.creator{font-size:14px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.context-label,.work-count{flex:none;font-size:10px;color:#aaaab6;white-space:nowrap}.creator-status{padding:12px;border:1px solid #ffffff1d;border-radius:10px;background:#ffffff04;margin-bottom:12px;transition:background .15s,border-color .15s}.creator-status[data-state=submitted]{background:#ff507716;border-color:#ff78976b}.status-heading{justify-content:space-between;margin-bottom:9px}.subscription-state{font-weight:600;font-size:12px}.subscription-state:before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:7px;background:#9699ad}.creator-status[data-enabled=true] .subscription-state:before{background:#ff8ba5}.refresh-state{padding:0;background:transparent;border:0;font-size:10px;color:#c5c6d1}
 .status-times{align-items:start;gap:10px}.status-times>div{flex:1;min-width:0}.status-times small{display:block;font-size:10px;color:#a8a9b5}.last-success,.next-check{display:block;font-size:11px;margin-top:2px;overflow-wrap:anywhere}.state-note{margin:8px 0 0;font-size:10px;color:#c2c3ce;overflow-wrap:anywhere}
 .actions{display:grid;gap:8px}.actions>button{width:100%;min-height:39px}.quick-actions>*{flex:1;min-width:0}.quick-actions button,.quick-actions a{font-size:11px;min-height:37px}.primary{background:#ff507710;border-color:#ff789749;font-weight:600}.primary:hover{background:#ff50771c}a{color:#d4d5df;text-decoration:none}.archive-link{display:flex;align-items:center;justify-content:center;border:1px solid #ffffff1c;border-radius:9px;padding:8px}
 .plan{display:grid;gap:7px;margin-top:13px}.plan label{font-size:11px;color:#c2c3ce}input,select{display:block;width:100%;min-width:0;background:#ffffff05;border:1px solid #ffffff24;border-radius:8px;padding:8px 9px;outline-color:#ff8ba5}select option{background:#272830}.submit-plan{width:100%;min-height:40px;border-color:#ff789749;background:#ff50770b}.actions button[data-state=submitted],.submit-plan[data-state=submitted]{background:#a73754;border-color:#d85b7b;color:white;font-weight:600;opacity:1}.actions button[data-state=submitting],.submit-plan[data-state=submitting]{background:#663142;border-color:#ad5b72;opacity:1}.hint{font-size:10px;line-height:1.6;color:#aeb0bd;margin:0}
@@ -153,7 +168,8 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
   toggle.setAttribute('aria-label','打开媒体库发送菜单');toggle.setAttribute('aria-expanded','false');
   const header=node('header'), brand=node('div'), title=node('strong','','抖音收藏库'), subtitle=node('small','','下载与归档'),close=node('button','close','×');
   close.setAttribute('aria-label','收起下载面板');brand.append(title,subtitle);header.append(brand,close);
-  const creator=node('strong','creator','正在识别博主'),contextLabel=node('span','context-label','· 当前作品'),identity=node('div','identity');identity.append(creator,contextLabel);
+  const creator=node('strong','creator','正在识别博主'),contextLabel=node('span','context-label','· 当前作品'),workCount=node('span','work-count','· 数量暂不可用'),identity=node('div','identity');
+  workCount.title='抖音主页显示的作品数；实际可下载数量可能不同。';workCount.setAttribute('aria-live','polite');identity.append(creator,contextLabel,workCount);
   const card=node('div','creator-status'),heading=node('div','status-heading'),subscriptionLabel=node('span','subscription-state','待核对'),refresh=node('button','refresh-state','刷新 ↻');
   heading.append(subscriptionLabel,refresh);
   const times=node('div','status-times'),lastColumn=node('div'),nextColumn=node('div'),lastSuccess=node('span','last-success','暂无记录'),nextCheck=node('span','next-check','未设计划');
@@ -173,10 +189,10 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
   const preference=node('select');for(const [value,text] of [['detail','突出当前作品'],['author','突出博主更新']]){const option=node('option','',text);option.value=value;preference.append(option);}preference.value=defaultKind(GM_getValue('library_default_kind','author'));
   function field(text,control){const label=node('label','',text);label.append(control);form.append(label);}
   field('网站地址',serverInput);field('管理员密钥',tokenInput);field('默认下载操作',preference);const save=node('button','','保存设置');save.type='submit';form.append(save);settings.append(summary,form);
-  const footer=node('div','footer');footer.append(node('small','','助手 1.9.1'),node('span','','下载后在媒体库查看进度'));
+  const footer=node('div','footer');footer.append(node('small','','助手 1.10.0'),node('span','','下载后在媒体库查看进度'));
   panel.append(header,downloads,status,settings,footer);shadow.append(style,panel,toggle);document.body.append(host);
   let targets={detail:null,author:null},anchor=null,hadRail=false,authors=null,history=null,loading=null,generation=0,dataRevision=0,viewRevision=0,busy=false,frequencyDirty=false,settingsOverride=false,currentName='',stateAttempted=false;
-  const recent=new Set(),feedback=new Map();
+  const recent=new Set(),feedback=new Map(),counts=new Map();
   const server=()=>GM_getValue('library_server','');
   const configured=()=>Boolean(server()&&GM_getValue('library_token',''));
   const contextKey=()=>JSON.stringify([server(),targets.author,targets.detail]);
@@ -189,8 +205,21 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
       onerror(){reject(new Error('网站不可达，请检查 NAS 连接。'));},ontimeout(){reject(new Error('网站响应超时，请先查看任务后重试。'));},onabort(){reject(new Error('请求已中止，可以重新尝试。'));}});
   });}
   function authorState(){return authors?subscriptionState(authors,targets.author):null;}
+  function paintCount(){const item=counts.get(targets.author);workCount.textContent=item?.pending?'· 数量读取中…':Number.isSafeInteger(item?.value)?`· 共 ${item.value.toLocaleString('zh-CN')} 个作品`:'· 数量暂不可用';}
+  async function loadCount(force=false){
+    const link=targets.author;
+    if(panel.hidden||settings.open||!link||!force&&counts.has(link))return;
+    const item={pending:true,value:null};counts.set(link,item);paintCount();
+    try{
+      const pageWindow=typeof unsafeWindow==='undefined'?globalThis:unsafeWindow;
+      const response=await pageWindow.fetch(new URL(link).pathname,{credentials:'same-origin',signal:AbortSignal.timeout(10000)});
+      if(response.ok){const doc=new DOMParser().parseFromString(await response.text(),'text/html');item.value=profileCount([...doc.scripts].map(s=>s.textContent),link);}
+    }catch{}
+    finally{item.pending=false;if(counts.get(link)===item&&targets.author===link)paintCount();}
+  }
   function formatTime(value){const date=new Date(typeof value==='number'?value*1000:value);return value&&Number.isFinite(date.getTime())?new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(date):'暂无记录';}
   function paint(){
+    paintCount();
     const found=authorState(),author=found?.author;
     if(!frequencyDirty)frequency.value=author?author.enabled?found.frequency:'once':'once';
     subscriptionLabel.textContent=!configured()?'未连接':loading?'核对中…':!authors?'待核对':author?.enabled?`已订阅 · ${labels[found.frequency]}`:'未订阅';
@@ -208,7 +237,7 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
     const preferred=defaultKind(GM_getValue('library_default_kind','author'));detailButton.classList.toggle('primary',preferred==='detail');authorButton.classList.toggle('primary',preferred==='author');
     try{libraryLink.href=normalizeServer(server())+'/#tasks';}catch{libraryLink.href='#';}
   }
-  function clearState(){generation++;dataRevision++;authors=history=null;loading=null;frequencyDirty=false;stateAttempted=false;recent.clear();feedback.clear();}
+  function clearState(){generation++;dataRevision++;authors=history=null;loading=null;frequencyDirty=false;stateAttempted=false;recent.clear();feedback.clear();counts.clear();}
   function loadState(force=false){
     if(panel.hidden||settings.open||!targets.author||!configured()){paint();return Promise.resolve();}
     if(!force&&authors&&history){paint();return Promise.resolve();}if(loading&&!force)return loading;
@@ -257,7 +286,7 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
     else if(!hadRail){rail=[...(scope?.querySelectorAll('[data-e2e="user-info"] a[href*="/user/"]')||[])].find(el=>visible(el)&&(!targets.author||resolveTargets(el.href).author===targets.author));if(rail)anchor=rail.getBoundingClientRect();}
     for(let n=rail?.parentElement;n&&scope.contains(n);n=n.parentElement){const r=n.getBoundingClientRect();if(r.width>140)break;if(anchor&&visible(n)&&n.querySelector('[data-e2e="video-player-digg"]'))anchor={left:anchor.left,width:anchor.width,top:r.top};}
     if(scope!==observedScope){layoutObserver.disconnect();if(scope)layoutObserver.observe(scope);observedScope=scope;}
-    paint();position();if(!panel.hidden&&!settings.open)loadState().catch(()=>{});
+    paint();position();if(!panel.hidden&&!settings.open){loadState().catch(()=>{});loadCount();}
   }
   function configure(){settingsOverride=true;host.hidden=false;if(panel.hidden)togglePanel(panel,toggle);settings.open=true;position();serverInput.focus();}
   async function run(action){
@@ -292,7 +321,7 @@ button,input,select{font:inherit;color:inherit}button,a,input,select,summary{out
   close.addEventListener('click',()=>{settingsOverride=false;togglePanel(panel,toggle);toggle.focus();detect();});
   detailButton.addEventListener('click',()=>run('detail'));authorButton.addEventListener('click',()=>run('author'));submit.addEventListener('click',()=>run('plan'));
   frequency.addEventListener('change',()=>{frequencyDirty=true;paint();});
-  refresh.addEventListener('click',()=>{recent.clear();feedback.clear();message('');loadState(true).catch(()=>{});});
+  refresh.addEventListener('click',()=>{recent.clear();feedback.clear();message('');loadState(true).catch(()=>{});loadCount(true);});
   libraryLink.addEventListener('click',event=>{if(!configured()){event.preventDefault();configure();}});
   form.addEventListener('submit',event=>{event.preventDefault();let value;try{value=normalizeServer(serverInput.value);}catch(error){message(error.message,true);return;}const token=tokenInput.value.trim()||GM_getValue('library_token','');if(!token){message('请填写管理员密钥。',true);return;}GM_setValue('library_server',value);GM_setValue('library_token',token);GM_setValue('library_default_kind',defaultKind(preference.value));tokenInput.value='';settingsOverride=false;settings.open=false;clearState();message('设置已保存。');detect();});
   settings.addEventListener('toggle',()=>{panel.classList.toggle('settings-open',settings.open);title.textContent=settings.open?'连接与下载设置':'抖音收藏库';summary.textContent=settings.open?'‹ 返回下载':'连接与下载设置';position();});
